@@ -1,0 +1,15 @@
+# Normalize all text files to LF in the repository
+* text=auto eol=lf
+
+# Explicitly enforce LF for text file types
+*.md text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+
+# Git config files
+.gitattributes text eol=lf
+.gitignore text eol=lf
