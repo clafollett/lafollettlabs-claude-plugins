@@ -29,27 +29,37 @@ Every issue defines **outcomes and behaviors**, not implementation steps. The im
 | Task | Technical work that isn't user-facing | `references/task-template.md` |
 | Bug | Defect report with repro steps | `references/bug-template.md` |
 
+## Script Location
+
+The CLI script is at `scripts/gh-issues.js` relative to this SKILL.md file. When invoking it, use the absolute path to the installed plugin location. Find it with:
+```
+find ~/.claude/plugins -path "*/issue-manager/*/scripts/gh-issues.js" -print -quit
+```
+
+All file operations (epic folders, docs) are created in the **current working directory's project root** (detected via `git rev-parse --show-toplevel`), NOT in the plugin's install directory.
+
 ## Workflow
 
 ### Create a New Epic + Stories
 
-1. `node .claude/skills/issue-manager/scripts/gh-issues.js init --name "Epic Title"`
-2. Edit the generated markdown files using the reference templates
-3. Add Story/Task/Bug files: `01-Story-Title.md`, `02-Task-Title.md`, etc.
-4. `node .claude/skills/issue-manager/scripts/gh-issues.js create --docs-path docs/epics/<slug>`
-5. Script creates GitHub Issues, links children to Epic, saves state
+1. Locate the script: `GH_ISSUES=$(find ~/.claude/plugins -path "*/issue-manager/*/scripts/gh-issues.js" -print -quit)`
+2. `node "$GH_ISSUES" init --name "Epic Title"`
+3. Edit the generated markdown files using the reference templates
+4. Add Story/Task/Bug files: `01-Story-Title.md`, `02-Task-Title.md`, etc.
+5. `node "$GH_ISSUES" create --docs-path docs/epics/<slug>`
+6. Script creates GitHub Issues, links children to Epic, saves state
 
 ### Import Existing Epic for Rework
 
-1. `node .claude/skills/issue-manager/scripts/gh-issues.js import --epic 582`
+1. `node "$GH_ISSUES" import --epic 582`
 2. Downloads Epic + all child issues to `docs/epics/582-<slug>/`
 3. Edit the local markdown files (rework to intent-over-implementation)
-4. `node .claude/skills/issue-manager/scripts/gh-issues.js update --docs-path docs/epics/582-<slug>`
+4. `node "$GH_ISSUES" update --docs-path docs/epics/582-<slug>`
 5. Pushes edits to existing GitHub Issues by mapped ID (no duplicates)
 
 ### Check Sync Status
 
-1. `node .claude/skills/issue-manager/scripts/gh-issues.js status --docs-path docs/epics/<slug>`
+1. `node "$GH_ISSUES" status --docs-path docs/epics/<slug>`
 
 ### Quality Gate
 
@@ -70,7 +80,7 @@ Use GitHub labels for type identification:
 
 ## CLI Script
 
-**Location:** `.claude/skills/issue-manager/scripts/gh-issues.js`
+**Location:** `scripts/gh-issues.js` (relative to this skill's install directory)
 
 | Command | Purpose |
 |---------|---------|
