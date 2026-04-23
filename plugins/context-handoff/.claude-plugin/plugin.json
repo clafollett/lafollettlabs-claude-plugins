@@ -1,10 +1,10 @@
 {
   "name": "context-handoff",
   "description": "Session state handoff and resume — save working context to JSON, resume in a fresh session with prior-session deduplication",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "LaFollett Labs LLC",
-    "email": "cali.lafollett@corebizy.ai"
+    "email": "cali.lafollett@gmail.com"
   },
   "keywords": [
     "context",
