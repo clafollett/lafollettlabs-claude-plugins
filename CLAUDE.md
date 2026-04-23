@@ -16,20 +16,17 @@ skills/             # Skills (install to .claude/skills/ in target project)
 
 **Commands** (global, apply to all projects):
 ```sh
-# Symlink into your global commands directory
-ln -sf "$(pwd)/commands/handoff-context.md" ~/.claude/commands/handoff-context.md
-ln -sf "$(pwd)/commands/resume-context.md" ~/.claude/commands/resume-context.md
+cp commands/handoff-context.md ~/.claude/commands/
+cp commands/resume-context.md ~/.claude/commands/
 ```
 
-**Skills** (per-project, copy or symlink into target repo):
+**Skills** (per-project, copy into target repo):
 ```sh
 # From the target project root
 cp -r /path/to/lafollettlabs-claude-plugins/skills/issue-manager .claude/skills/
-# Or symlink
-ln -sf /path/to/lafollettlabs-claude-plugins/skills/issue-manager .claude/skills/issue-manager
 ```
 
 ## Contributing
 
-Edit files here, commit, push. Pull updates in consuming projects.
-Commands symlinked to `~/.claude/commands/` update automatically on `git pull`.
+This repo is the source of truth. Edit here, commit, push.
+After pulling updates, re-copy changed files to `~/.claude/commands/` or target project `.claude/skills/`.
