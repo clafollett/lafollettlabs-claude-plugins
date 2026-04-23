@@ -1,6 +1,6 @@
 # LaFollett Labs — Claude Code Plugins
 
-Claude Code plugin marketplace for [LaFollett Labs LLC](https://corebizy.ai). Cross-project skills, commands, and developer workflow tools that work in any repository.
+Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.com). Cross-project skills, commands, and developer workflow tools that work in any repository.
 
 ## Available Plugins
 
