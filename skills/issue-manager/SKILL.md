@@ -1,0 +1,101 @@
+---
+name: issue-manager
+description: Use when creating GitHub Issues (Epics, Stories, Tasks, Bugs), reviewing issue quality, or converting ADRs into Epics. Enforces intent-over-implementation — issues define WHAT and WHY, never HOW.
+---
+
+# Issue Manager
+
+Create and manage GitHub Issues with intent-focused templates. All issues follow the Intent Officer model: define intent and outcomes, engineers decide implementation.
+
+## Core Principle: Intent Over Implementation
+
+Every issue defines **outcomes and behaviors**, not implementation steps. The implementing agent (CTO, engineer) decides the approach. Stories describe what the system should do from the user's or operator's perspective — never how to build it internally.
+
+## When to Use This Skill
+
+- Creating a new Epic with child Stories/Tasks
+- Creating standalone Stories, Tasks, or Bugs
+- Importing existing GitHub Epics to local markdown for rework
+- Reviewing existing issues for quality (too implementation-heavy?)
+- Converting ADR decisions into Epics with proper story breakdown
+- Rewriting implementation-focused issues into intent-focused ones
+
+## Issue Types
+
+| Type | When | Template |
+|------|------|----------|
+| Epic | Business goal spanning multiple stories | `references/epic-template.md` |
+| Story | User-facing feature or capability | `references/story-template.md` |
+| Task | Technical work that isn't user-facing | `references/task-template.md` |
+| Bug | Defect report with repro steps | `references/bug-template.md` |
+
+## Workflow
+
+### Create a New Epic + Stories
+
+1. `node .claude/skills/issue-manager/scripts/gh-issues.js init --name "Epic Title"`
+2. Edit the generated markdown files using the reference templates
+3. Add Story/Task/Bug files: `01-Story-Title.md`, `02-Task-Title.md`, etc.
+4. `node .claude/skills/issue-manager/scripts/gh-issues.js create --docs-path docs/epics/<slug>`
+5. Script creates GitHub Issues, links children to Epic, saves state
+
+### Import Existing Epic for Rework
+
+1. `node .claude/skills/issue-manager/scripts/gh-issues.js import --epic 582`
+2. Downloads Epic + all child issues to `docs/epics/582-<slug>/`
+3. Edit the local markdown files (rework to intent-over-implementation)
+4. `node .claude/skills/issue-manager/scripts/gh-issues.js update --docs-path docs/epics/582-<slug>`
+5. Pushes edits to existing GitHub Issues by mapped ID (no duplicates)
+
+### Check Sync Status
+
+1. `node .claude/skills/issue-manager/scripts/gh-issues.js status --docs-path docs/epics/<slug>`
+
+### Quality Gate
+
+Before creating any issue, verify against `references/quality-checklist.md`:
+- [ ] Description focuses on WHAT and WHY, not HOW
+- [ ] Acceptance criteria are observable outcomes, not implementation checkpoints
+- [ ] No code snippets, file paths, or library choices (unless Epic-level architectural constraint)
+- [ ] Domain language used, not technical jargon
+- [ ] Stories are INVEST: Independent, Negotiable, Valuable, Estimable, Small, Testable
+
+### Labels
+
+Use GitHub labels for type identification:
+- `epic` — Epic issues
+- `story` — User stories
+- `task` — Technical tasks
+- `bug` — Defect reports
+
+## CLI Script
+
+**Location:** `.claude/skills/issue-manager/scripts/gh-issues.js`
+
+| Command | Purpose |
+|---------|---------|
+| `init --name "Title" [--epic 582]` | Initialize new epic folder with template |
+| `create --docs-path docs/epics/<slug>` | Create GitHub Issues from local markdown |
+| `update --docs-path <path> [--file <file>]` | Update existing Issues from edited markdown |
+| `import --epic 582 [--docs-path <path>]` | Import Epic + children to local markdown |
+| `status --docs-path <path>` | Show sync status (local vs GitHub) |
+
+**State tracking:** `.github-state.json` in each epic directory maps filenames to GitHub issue numbers. The script is idempotent — re-running `create` skips already-created issues.
+
+**Epic folder naming:** `###-slug` where `###` is a 3-digit ordinal (e.g., `001-db-reset`, `004-slack-integration`).
+
+**File naming:** `##-Type-Title-With-Dashes.md` where `00` = Epic, `01+` = children. Types: Epic, Story, Task, Bug.
+
+## References (load on demand)
+
+| Reference | When to Load |
+|-----------|-------------|
+| `references/epic-template.md` | Creating an Epic |
+| `references/story-template.md` | Creating a Story |
+| `references/task-template.md` | Creating a Task |
+| `references/bug-template.md` | Creating a Bug |
+| `references/quality-checklist.md` | Reviewing issue quality |
+
+## IMPORTANT: Post-Creation Gate
+
+After creating an Epic and its Stories, STOP. Do NOT proceed to implementation, create branches, or start coding. The CEO dispatches implementation work separately.
