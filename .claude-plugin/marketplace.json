@@ -1,0 +1,27 @@
+{
+  "name": "lafollettlabs-claude-plugins",
+  "owner": {
+    "name": "LaFollett Labs LLC",
+    "email": "cali.lafollett@corebizy.ai"
+  },
+  "metadata": {
+    "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "context-handoff",
+      "description": "Session state handoff and resume — save working context to JSON, resume in a fresh session with prior-session deduplication",
+      "source": "./plugins/context-handoff",
+      "category": "developer-tools",
+      "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
+    },
+    {
+      "name": "issue-manager",
+      "description": "GitHub Issue management with intent-over-implementation templates — Epics, Stories, Tasks, Bugs with quality gates and CLI automation",
+      "source": "./plugins/issue-manager",
+      "category": "developer-tools",
+      "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
+    }
+  ]
+}

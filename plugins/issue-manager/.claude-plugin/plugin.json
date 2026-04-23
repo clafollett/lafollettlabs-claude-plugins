@@ -1,0 +1,16 @@
+{
+  "name": "issue-manager",
+  "description": "GitHub Issue management with intent-over-implementation templates — Epics, Stories, Tasks, Bugs with quality gates and CLI automation",
+  "version": "1.0.0",
+  "author": {
+    "name": "LaFollett Labs LLC",
+    "email": "cali.lafollett@corebizy.ai"
+  },
+  "keywords": [
+    "github",
+    "issues",
+    "epics",
+    "stories",
+    "project-management"
+  ]
+}

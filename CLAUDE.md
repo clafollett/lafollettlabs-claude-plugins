@@ -1,32 +1,38 @@
 # LaFollett Labs — Claude Plugins
 
-Cross-project Claude Code commands and skills maintained by LaFollett Labs LLC.
+Cross-project Claude Code plugins maintained by LaFollett Labs LLC.
+Marketplace-installable via `/plugins`.
 
 ## Structure
 
 ```
-commands/           # Slash commands (install to ~/.claude/commands/)
-  handoff-context.md    # /handoff-context — save session state for resumption
-  resume-context.md     # /resume-context — load prior session state
-skills/             # Skills (install to .claude/skills/ in target project)
-  issue-manager/        # /issue-manager — GitHub Issue management with intent-over-implementation
+.claude-plugin/
+  marketplace.json          # Marketplace registry — lists all plugins
+plugins/
+  context-handoff/          # /handoff-context + /resume-context
+    .claude-plugin/plugin.json
+    commands/
+      handoff-context.md
+      resume-context.md
+  issue-manager/            # /issue-manager — GitHub Issue management
+    .claude-plugin/plugin.json
+    skills/
+      issue-manager/
+        SKILL.md
+        references/
+        scripts/
 ```
 
 ## Installation
 
-**Commands** (global, apply to all projects):
-```sh
-cp commands/handoff-context.md ~/.claude/commands/
-cp commands/resume-context.md ~/.claude/commands/
+Add the marketplace, then install individual plugins:
 ```
-
-**Skills** (per-project, copy into target repo):
-```sh
-# From the target project root
-cp -r /path/to/lafollettlabs-claude-plugins/skills/issue-manager .claude/skills/
+/plugins marketplace add https://github.com/clafollett/lafollettlabs-claude-plugins
+/plugins install context-handoff
+/plugins install issue-manager
 ```
 
 ## Contributing
 
-This repo is the source of truth. Edit here, commit, push.
-After pulling updates, re-copy changed files to `~/.claude/commands/` or target project `.claude/skills/`.
+This repo is the source of truth. Each plugin is independently versioned.
+Edit here, commit, push. Consumers pull updates via `/plugins update`.
