@@ -8,6 +8,7 @@ Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.co
 | ------ | ------- | ------- |
 | [context-handoff](./plugins/context-handoff/) | Session state handoff and resume with prior-session deduplication | [Commands](./plugins/context-handoff/commands/) |
 | [issue-manager](./plugins/issue-manager/) | GitHub Issue management with intent-over-implementation templates | [Skill](./plugins/issue-manager/skills/issue-manager/SKILL.md) |
+| [session-analyzer](./plugins/session-analyzer/) | Analyze and extract conversations from Claude Code session JSONL files | [Skill](./plugins/session-analyzer/skills/session-analyzer/SKILL.md) |
 
 ### context-handoff
 
@@ -26,6 +27,16 @@ Create and manage GitHub Issues using intent-focused templates. All issues defin
 - Markdown-first workflow: author locally in `docs/epics/`, push to GitHub Issues
 - INVEST story validation and intent-over-implementation enforcement
 
+### session-analyzer
+
+Analyze and extract conversations from Claude Code session JSONL files. Python 3.10+, zero dependencies.
+
+- **`list`** — Discover session files by project or across all projects
+- **`extract`** — Human-readable conversation transcript with optional tool calls, thinking blocks, and timestamps
+- **`analyze`** — Session statistics: duration, token usage, cache hit rate, tool breakdown, files modified
+- Streaming parser handles arbitrarily large session files
+- Markdown or JSON output formats
+
 ## Installation
 
 ### Add the Marketplace
@@ -41,6 +52,7 @@ In Claude Code, open the plugin manager and add this marketplace:
 ```
 /plugins install context-handoff
 /plugins install issue-manager
+/plugins install session-analyzer
 ```
 
 ### Manual Installation
@@ -57,6 +69,11 @@ cp plugins/context-handoff/commands/resume-context.md ~/.claude/commands/
 ```sh
 # From the target project root
 cp -r plugins/issue-manager/skills/issue-manager .claude/skills/
+```
+
+**session-analyzer** (per-project skill):
+```sh
+cp -r plugins/session-analyzer/skills/session-analyzer .claude/skills/
 ```
 
 ## Repository Structure
@@ -77,6 +94,12 @@ plugins/
         SKILL.md
         references/             # Issue templates + quality checklist
         scripts/                # gh-issues.js CLI
+  session-analyzer/             # Plugin: session JSONL analysis
+    .claude-plugin/plugin.json
+    skills/
+      session-analyzer/
+        SKILL.md
+        scripts/                # session-analyzer.py CLI
 ```
 
 ## Contributing

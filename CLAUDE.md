@@ -21,6 +21,12 @@ plugins/
         SKILL.md
         references/
         scripts/
+  session-analyzer/         # /session-analyzer — JSONL session analysis
+    .claude-plugin/plugin.json
+    skills/
+      session-analyzer/
+        SKILL.md
+        scripts/
 ```
 
 ## Installation

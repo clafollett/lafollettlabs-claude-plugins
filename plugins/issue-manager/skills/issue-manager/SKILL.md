@@ -31,9 +31,21 @@ Every issue defines **outcomes and behaviors**, not implementation steps. The im
 
 ## Script Location
 
-The CLI script is at `scripts/gh-issues.js` relative to this SKILL.md file. When invoking it, use the absolute path to the installed plugin location. Find it with:
-```
-find ~/.claude/plugins -path "*/issue-manager/*/scripts/gh-issues.js" -print -quit
+The CLI script is at `scripts/gh-issues.js` relative to this SKILL.md file. When invoking it, use the absolute path to the installed plugin location.
+
+The plugin cache at `~/.claude/plugins/cache/` keeps **multiple versions** side-by-side. The canonical active version is recorded in `~/.claude/plugins/installed_plugins.json` under the `installPath` field. Use it to resolve the correct script:
+
+```bash
+# Resolve via installed_plugins.json (canonical — always points to the active version)
+GH_ISSUES=$(python3 -c "
+import json, pathlib
+data = json.loads((pathlib.Path.home() / '.claude/plugins/installed_plugins.json').read_text())
+entry = data.get('plugins', {}).get('issue-manager@lafollettlabs-claude-plugins', [{}])[0]
+print(pathlib.Path(entry['installPath']) / 'skills/issue-manager/scripts/gh-issues.js')
+" 2>/dev/null)
+
+# Fallback for manual install (no version ambiguity)
+[ -z "$GH_ISSUES" ] && GH_ISSUES=$(find ~/.claude/skills -path "*/issue-manager/scripts/gh-issues.js" -print -quit 2>/dev/null)
 ```
 
 All file operations (epic folders, docs) are created in the **current working directory's project root** (detected via `git rev-parse --show-toplevel`), NOT in the plugin's install directory.
@@ -42,7 +54,7 @@ All file operations (epic folders, docs) are created in the **current working di
 
 ### Create a New Epic + Stories
 
-1. Locate the script: `GH_ISSUES=$(find ~/.claude/plugins -path "*/issue-manager/*/scripts/gh-issues.js" -print -quit)`
+1. Locate the script using the discovery command above
 2. `node "$GH_ISSUES" init --name "Epic Title"`
 3. Edit the generated markdown files using the reference templates
 4. Add Story/Task/Bug files: `01-Story-Title.md`, `02-Task-Title.md`, etc.

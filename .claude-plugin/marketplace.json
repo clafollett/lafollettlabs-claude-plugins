@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
-    "version": "1.0.1"
+    "version": "1.1.0"
   },
   "plugins": [
     {
@@ -20,6 +20,13 @@
       "name": "issue-manager",
       "description": "GitHub Issue management with intent-over-implementation templates — Epics, Stories, Tasks, Bugs with quality gates and CLI automation",
       "source": "./plugins/issue-manager",
+      "category": "developer-tools",
+      "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
+    },
+    {
+      "name": "session-analyzer",
+      "description": "Analyze and extract conversations from Claude Code session JSONL files — transcripts, token stats, tool usage, and session discovery",
+      "source": "./plugins/session-analyzer",
       "category": "developer-tools",
       "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
     }
