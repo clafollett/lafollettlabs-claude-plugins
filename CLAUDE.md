@@ -9,11 +9,15 @@ Marketplace-installable via `/plugins`.
 .claude-plugin/
   marketplace.json          # Marketplace registry — lists all plugins
 plugins/
-  context-handoff/          # /handoff-context + /resume-context
+  context-handoff/          # /handoff-context + /resume-context + context monitoring
     .claude-plugin/plugin.json
     commands/
       handoff-context.md
       resume-context.md
+    hooks/
+      hooks.json              # Stop hook — context usage monitor
+    scripts/
+      context-monitor.sh      # Token tracking + threshold warnings
   issue-manager/            # /issue-manager — GitHub Issue management
     .claude-plugin/plugin.json
     skills/

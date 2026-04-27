@@ -6,12 +6,12 @@
   },
   "metadata": {
     "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "plugins": [
     {
       "name": "context-handoff",
-      "description": "Session state handoff and resume — save working context to JSON, resume in a fresh session with prior-session deduplication",
+      "description": "Session state handoff, resume, and context usage monitoring — save working context to JSON, resume in fresh sessions, and get automatic warnings as context fills up",
       "source": "./plugins/context-handoff",
       "category": "developer-tools",
       "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
