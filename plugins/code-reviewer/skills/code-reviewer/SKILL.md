@@ -1,0 +1,326 @@
+---
+name: code-reviewer
+description: This skill should be used when performing code reviews, PR reviews, reviewing code changes, or analyzing code quality. Uses right-sized review approach - primary agent handles small changes directly, sub-agents for larger reviews. Focuses only on changed code with scope discipline. Produces de-duplicated, actionable findings in ./docs/code-reviews/.
+---
+
+# Expert Code Review
+
+Lean, pragmatic code reviews with scope discipline.
+
+---
+
+## Phase 1: Scope Analysis
+
+Determine review type based on user request:
+
+| User Request | Review Type | What to Review |
+| - | - | - |
+| "Review my branch" / "Review this PR" | **Branch Diff** | `git diff main...HEAD` |
+| GitHub PR URL or "Review PR #N" | **PR Review** | `git diff <target>...<source>` (auto-checkouts source branch) |
+| "Review staged changes" | **Staged Diff** | `git diff --cached` |
+| "Review these files: X, Y, Z" | **Specific Files** | Read and review entire files |
+| "Review the src/services folder" | **Folder** | Read and review all files in folder |
+| "Review this code" + pasted code | **Ad-hoc** | Review the provided code |
+
+### For Branch/Staged Reviews
+
+```bash
+git diff main...HEAD      # branch diff
+git diff --cached         # staged changes
+```
+
+Confirm the current branch is the intended review target before proceeding.
+If on `main`, stop and ask the user which branch to review.
+
+### For PR Reviews
+
+1. Extract PR metadata: `gh pr view <PR_NUMBER> --json number,url,headRefName,baseRefName,author`
+   — Capture: source branch, target branch, PR number, PR URL, author
+2. Checkout source branch and pull latest:
+
+   ```bash
+   git checkout <source_branch>
+   git pull
+   ```
+
+3. Diff against target: `git diff <target_branch>...<source_branch>`
+4. Store PR metadata (number, URL, target branch, author) for Phase 6
+
+**Critical:** Review files MUST be committed to the source branch, never to main.
+
+### For Specific Files/Folders
+
+Read the files directly. Review entire content (no diff context).
+
+### Review Name
+
+Used for the output filename (see Phase 6). Determine from branch:
+
+1. **Issue ID in branch** → use issue ID (e.g. `983`) - Extract from branch: `git branch --show-current` → `<type>/<issue-id>-<description>`
+2. **Branch, no issue ID** → slugify branch name
+3. **On main** → ask the user for a short descriptive name
+
+### Review Sizing
+
+After determining the review type and checking out the correct branch, get diff stats:
+
+```bash
+git diff main...HEAD --stat | tail -1          # branch reviews
+git diff <target>...<source> --stat | tail -1  # PR reviews
+```
+
+| Lines Changed | Approach |
+| - | - |
+| **< 200** | Primary agent reviews directly |
+| **≥ 200** | Dispatch sub-agents (Security, Architecture, Code Quality) |
+
+---
+
+## Project-Specific References
+
+Scan the diff for patterns that match reference files in the `references/`
+directory. If a reference file exists and the diff touches that domain,
+**read the reference file** before reviewing.
+
+This allows each project to supply its own domain-specific review rules
+(e.g., DAL patterns, CDK conventions, design system tokens) without
+modifying the skill itself. Add `.md` files to `references/` as needed.
+
+---
+
+## Phase 2: Scope Discipline
+
+### For Diff-Based Reviews (Branch/Staged)
+
+**In Scope** - Issues in the changed code:
+
+- Lines added/modified in the diff
+- Functions containing changes
+- New imports/dependencies
+- **Report ALL severities** (CRITICAL → INFO) for awareness
+- **Verdict based on highest severity** (CRITICAL/HIGH block, others don't)
+
+**Out of Scope** - Pre-existing issues in unchanged code:
+
+- Note them for awareness (tech debt)
+- Do NOT block the PR for pre-existing issues
+- Log to backlog, not action items
+
+### For File/Folder/Ad-hoc Reviews
+
+Everything is "in scope" - review the entire content provided. Use judgment on severity:
+
+- Focus on security and architecture issues first
+- Don't nitpick style on existing code unless explicitly asked
+
+---
+
+## Phase 3: Review Execution
+
+### Primary Agent Reviews (< 200 lines)
+
+Review the diff yourself for security, architecture, and code quality issues. No sub-agents needed.
+
+### Sub-Agent Reviews (≥ 200 lines)
+
+Dispatch Security, Architecture, and Code Quality experts in parallel (single message, multiple Agent calls).
+
+**Sub-agent prompt:**
+
+```markdown
+You are the {EXPERT_TYPE} expert for code review {ISSUE_ID}.
+
+SCOPE RULES:
+- ONLY review CHANGED lines in the diff
+- "in_scope: true" for issues IN the changes
+- "in_scope: false" for pre-existing issues (don't block PR)
+- Use FULL file paths from repository root (not abbreviated)
+  ✅ src/app/module/component/my-file.ts:167
+  ❌ my-file.ts:167
+
+DIFF:
+{paste git diff output}
+
+Return findings in this YAML structure:
+
+~~~yaml
+expert: {EXPERT_TYPE}
+findings:
+  - id: "{SEVERITY}-001"
+    severity: CRITICAL|HIGH|MEDIUM|LOW|INFO
+    in_scope: true|false
+    title: "Brief issue title"
+    location: "src/full/path/from/repo/root.ts:123"
+    description: |
+      Full description of the issue.
+    recommendation: |
+      How to fix it with code example if helpful.
+~~~
+
+Only return the YAML block, no other text.
+```
+
+---
+
+## Phase 4: De-duplication
+
+When consolidating sub-agent findings:
+
+1. **Merge duplicates** - Same issue from multiple experts = ONE finding
+2. **Tag domains** - Add `domains: [Security, Architecture]` to merged findings
+3. **Keep highest severity** - If experts disagree, use the higher severity
+
+---
+
+## Phase 5: Finding Validation
+
+Before writing the final report, validate all findings:
+
+**If sub-agents were used:**
+
+- Verify each finding's severity given full context
+- Dismiss false positives with brief rationale
+- Adjust severity if sub-agent over/under-rated
+- Question any CRITICAL/HIGH - is it truly blocking?
+
+**If primary reviewed directly:**
+
+- Re-examine any CRITICAL/HIGH findings identified
+- Confirm they're actionable and accurate
+- Downgrade if initial assessment was too harsh
+
+**Validation checklist for CRITICAL/HIGH:**
+
+- [ ] Is this actually exploitable / broken?
+- [ ] Does the full context change the severity?
+- [ ] Is this a real risk or theoretical?
+- [ ] Would a senior engineer agree this blocks the PR?
+
+**Never publish a CRITICAL/HIGH without a second look.**
+
+---
+
+## Phase 6: Output
+
+### Step 1: Determine Review Name and Output Path
+
+```text
+./docs/code-reviews/{name}-code-review.md
+```
+
+Determine `{name}` using this priority:
+
+1. **Issue ID in branch** (e.g. `feat/983-unified-api-gateway`) → `983`
+2. **Branch but no issue ID** (e.g. `fix/code-reviewer-cleanup`) → slugify branch: `fix-code-reviewer-cleanup`
+3. **On main / no branch** → ask the user for a short descriptive name
+
+### Step 2: Write or Append
+
+**File does not exist** → Write the full report using `assets/summary-report-template.md`.
+Populate the Reviewer (`git config user.name`), Review Round (1), and PR fields (number, URL, author — PR reviews only).
+
+**File already exists** (previous review) → Do NOT overwrite. Append a new Review Round:
+
+1. Read existing file, count `## Review Round` headings to determine next round number
+   (no round heading = implicit Round 1)
+2. Append a new Review Round section before the `Generated with Claude Code` footer
+   (see multi-round template in `assets/summary-report-template.md` for exact format)
+3. Update the top-level **Verdict** to reflect the latest round's verdict
+
+### Step 3: Commit
+
+```bash
+git add ./docs/code-reviews/{name}-code-review.md
+git commit -m "docs: {name} code review"
+```
+
+Commit to the **current branch** (source branch for PR reviews, feature branch for branch reviews).
+Never commit review files to main directly.
+
+### Step 4: PR Comment Prompt (PR Reviews Only)
+
+Prompt the reviewer:
+
+> Review complete and committed to `{source_branch}`.
+> Would you like to post a summary comment on PR #{number}?
+
+**If yes:**
+
+1. Post condensed summary via `gh pr comment`:
+   - Verdict, finding counts by severity, link to review file on branch
+   - Key findings (CRITICAL/HIGH only, one line each)
+   - Action items (Must Fix and Should Fix only)
+
+2. Approve or request changes based on verdict:
+
+| Verdict | Action |
+| - | - |
+| ✅ APPROVED | `gh pr review <PR_NUMBER> --approve` |
+| ⚠️ CHANGES REQUESTED | `gh pr review <PR_NUMBER> --request-changes` |
+| 🚫 BLOCKED | `gh pr review <PR_NUMBER> --request-changes` |
+
+**If no:** Done — review file is saved at the output path.
+
+---
+
+## Severity Definitions
+
+| Level | Criteria | Action |
+| - | - | - |
+| 🔴 CRITICAL | Security vulnerabilities, data loss, breaking changes | Must fix — blocks merge |
+| 🟠 HIGH | Bugs, significant design issues | Must fix — blocks merge |
+| 🟡 MEDIUM | Code quality, maintainability | Required — changes requested |
+| 🟢 LOW | Style, minor improvements | Optional |
+| ℹ️ INFO | Observations | Awareness |
+
+---
+
+## Verdict Logic
+
+| Condition | Verdict |
+| - | - |
+| Any CRITICAL (in_scope: true) | 🚫 BLOCKED |
+| Any HIGH (in_scope: true) | 🚫 BLOCKED |
+| Any MEDIUM (in_scope: true) | ⚠️ CHANGES REQUESTED |
+| Only LOW or INFO | ✅ APPROVED |
+
+If it's worth reporting, it's worth fixing. LOW and INFO are awareness items —
+everything above that requires remediation before merge.
+
+---
+
+## YAML Finding Structure
+
+Sub-agents MUST return findings in this exact format:
+
+```yaml
+expert: Security|Architecture|Code Quality
+findings:
+  - id: "CRITICAL-001"
+    severity: CRITICAL
+    in_scope: true
+    title: "XSS via unsanitized HTML injection"
+    location: "src/components/email-viewer.ts:207"
+    description: |
+      Email content is written to iframe using document.write()
+      without any sanitization, allowing arbitrary script execution.
+    recommendation: |
+      Use DOMPurify to sanitize HTML before injection:
+      ```typescript
+      import DOMPurify from 'dompurify';
+      const clean = DOMPurify.sanitize(emailContent);
+      ```
+
+  - id: "HIGH-001"
+    severity: HIGH
+    in_scope: true
+    title: "Memory leak - event listener not removed"
+    location: "src/components/email-viewer.ts:210"
+    description: |
+      Click event listener added to iframe but never removed
+      when component is destroyed.
+    recommendation: |
+      Implement cleanup and remove the listener on unmount.
+```
+
+Primary agent parses these YAML blocks and consolidates into final report.

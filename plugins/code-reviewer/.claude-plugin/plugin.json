@@ -1,0 +1,19 @@
+{
+  "name": "code-reviewer",
+  "description": "Lean code reviews with scope discipline — right-sized approach with structured findings",
+  "version": "1.0.0",
+  "author": {
+    "name": "LaFollett Labs",
+    "email": "cali.lafollett@gmail.com"
+  },
+  "keywords": [
+    "code",
+    "review",
+    "git",
+    "github",
+    "pull request",
+    "merge request",
+    "monitoring",
+    "tokens"
+  ]
+}

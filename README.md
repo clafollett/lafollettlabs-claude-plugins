@@ -6,9 +6,16 @@ Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.co
 
 | Plugin | Purpose | Details |
 | ------ | ------- | ------- |
+| [code-reviewer](./plugins/code-reviewer/skills/code-reviewer/) | Lean, scope-focused code reviews | [README](./plugins/code-reviewer/skills/code-reviewer/README.md) |
 | [context-handoff](./plugins/context-handoff/) | Session state handoff and resume with prior-session deduplication | [Commands](./plugins/context-handoff/commands/) |
 | [issue-manager](./plugins/issue-manager/) | GitHub Issue management with intent-over-implementation templates | [Skill](./plugins/issue-manager/skills/issue-manager/SKILL.md) |
 | [session-analyzer](./plugins/session-analyzer/) | Analyze and extract conversations from Claude Code session JSONL files | [Skill](./plugins/session-analyzer/skills/session-analyzer/SKILL.md) |
+
+**code-reviewer** — Lean, pragmatic code reviews
+
+- Right-sized reviews (primary agent for small, sub-agents for large)
+- Scope discipline (In Scope vs Out of Scope findings)
+- Consolidated reports at `./docs/code-reviews/`
 
 ### context-handoff
 
