@@ -26,22 +26,89 @@ A design harness for Claude Code that replicates and improves upon Claude Design
 4. **Parallel exploration** — use worktrees and sub-agents to try multiple directions simultaneously. Converge on the best.
 5. **Component-first when appropriate** — for projects with component architecture, design at the component level via Storybook, then compose into pages.
 
+## Asking Questions — Use AskUserQuestion
+
+Every multiple-choice prompt in this skill (reference intake, discovery questions, framework selection, variation count) **should use the `AskUserQuestion` tool** for proper selection UI. Plain markdown blockquotes force users to type answers and degrade UX.
+
+### Loading the tool
+
+`AskUserQuestion` is a **deferred tool** in Claude Code — its schema is not loaded by default, so calling it directly will error. Before the first prompt in a session, load it explicitly:
+
+```
+ToolSearch({ query: "select:AskUserQuestion", max_results: 1 })
+```
+
+After ToolSearch returns the schema, `AskUserQuestion` is callable for the rest of the turn.
+
+### Constraints
+
+- **1-4 questions per call** — group related discovery questions together to minimize round trips
+- **2-4 options per question** — every question in `references/question-library.md` is already pre-formatted to fit
+- **Do NOT add an "Other / something different" option** — the tool adds "Other" automatically
+- Each option needs a short `label` (1-5 words) and a `description` explaining the choice
+- Include `(Recommended)` at the end of the label for your top-pick option when one direction is clearly best
+- Set `multiSelect: true` only for genuinely non-exclusive questions (e.g., "which features do you want?")
+
+### Example invocation (Phase 1 questioning, grouped round)
+
+```
+AskUserQuestion({
+  questions: [
+    {
+      question: "What visual direction feels right?",
+      header: "Visual Style",
+      multiSelect: false,
+      options: [
+        { label: "Clean & minimal", description: "Lots of whitespace, subtle colors, understated" },
+        { label: "Bold & expressive", description: "Strong colors, large typography, dynamic" },
+        { label: "Dark & immersive", description: "Dark backgrounds, glowing accents, cinematic" },
+        { label: "Warm & approachable", description: "Rounded shapes, soft gradients, friendly" }
+      ]
+    },
+    {
+      question: "What is the primary goal of this project?",
+      header: "Goal",
+      multiSelect: false,
+      options: [
+        { label: "Convert visitors", description: "Sign-ups, leads, purchases" },
+        { label: "Showcase work", description: "Portfolio, product, brand" },
+        { label: "Inform & educate", description: "Documentation, content-first" },
+        { label: "Drive engagement", description: "Community, repeat visits" }
+      ]
+    }
+  ]
+})
+```
+
+### Fallback
+
+If `ToolSearch` does not return `AskUserQuestion` (e.g., the tool is unavailable in this environment), fall back to plain markdown multi-choice prompts using the format shown later in this skill. Note this once to the user: "AskUserQuestion isn't available — I'll use text prompts instead."
+
 ---
 
 ## Phase 1 — Discovery
 
 ### Step 1: Reference Material Intake
 
-Before asking design questions, ask the user if they have reference material:
+Before asking design questions, ask the user if they have reference material. **Use AskUserQuestion** with `multiSelect: true` since they may have multiple types of references:
 
-> Do you have any of the following to share before we start?
->
-> a) Epics, stories, or requirements docs (from GitHub Issues or a PRD)
-> b) Wireframes, mockups, or screenshots of reference/competitor sites
-> c) Figma files or design system documentation
-> d) Brand guidelines, logos, or existing visual assets
-> e) Existing Storybook setup or component library
-> f) None of the above — let's start from scratch
+```
+AskUserQuestion({
+  questions: [{
+    question: "Do you have any reference material to share before we start?",
+    header: "References",
+    multiSelect: true,
+    options: [
+      { label: "Epics or stories", description: "Requirements docs, GitHub Issues, PRDs" },
+      { label: "Wireframes or screenshots", description: "Mockups or reference site captures" },
+      { label: "Figma or design system", description: "Existing design files or token documentation" },
+      { label: "Brand assets", description: "Logos, colors, fonts, guidelines" }
+    ]
+  }]
+})
+```
+
+If the response includes "Other" with text mentioning Storybook, treat it as the existing-Storybook signal.
 
 If the user provides epics or stories, extract the **what** and **why** to inform layout structure, content hierarchy, and feature sections. The design should reflect what engineering is building.
 
@@ -91,9 +158,15 @@ Analyze the user's prompt for completeness across these dimensions:
 
 ### Step 4: Questioning Flow
 
-Present questions as multiple-choice groups. Maximum 2 rounds total, 3-5 questions per round. Pick questions from `references/question-library.md` based on which dimensions the gap analysis flagged. Group related questions into one round when possible.
+Pick questions from `references/question-library.md` based on which dimensions the gap analysis flagged. Group up to 4 related questions per `AskUserQuestion` call. Maximum 2 rounds total to avoid over-interrogating.
 
-Format:
+**Use AskUserQuestion** — every question in the library is already AskUserQuestion-ready: 2-4 distinct options each, with `Header` and `Skip if` metadata. Map them directly to AskUserQuestion fields:
+- The `Header:` line → `header` field (max 12 chars)
+- The blockquote question → `question` field
+- The bolded option labels → `options[].label`
+- The em-dash descriptions → `options[].description`
+
+Fallback format (only if AskUserQuestion is unavailable):
 
 ```
 Before I start designing, a few questions to nail the direction:
@@ -120,7 +193,7 @@ Before I start designing, a few questions to nail the direction:
    e) Or tell me something different
 ```
 
-After the user answers, proceed to Phase 2. Do not chase a third round of questions — fill remaining gaps with sensible defaults from the design brief and let the user redirect during iteration.
+After the user answers, proceed to Phase 2. Do not chase a third round of questions — fill remaining gaps with sensible defaults in the design brief and let the user redirect during iteration.
 
 ---
 
@@ -159,21 +232,27 @@ Ask: "Does this plan look right, or should I adjust anything before I start buil
 
 ### Step 1: Framework Selection
 
-Always ask the user which framework to use. Present the options:
+Always ask the user which framework to use. **Use AskUserQuestion**. Since the library has 8 frameworks but the tool allows max 4 options, pick the top 4 based on the design brief context (e.g., "convert visitors / landing page" → HTML + Next.js + Astro + React; "dashboard / app" → Next.js + React + Vue + Svelte). Use "Other" as the escape hatch for less common picks.
 
-> Which framework should I use?
->
-> a) Vanilla HTML + Tailwind CDN — zero setup, instant preview
-> b) React + Vite + Tailwind
-> c) Next.js + Tailwind
-> d) Vue + Vite + Tailwind
-> e) Nuxt + Tailwind
-> f) Svelte/SvelteKit + Tailwind
-> g) Astro + Tailwind
-> h) Solid + Vite + Tailwind
-> i) Other — tell me what you want
+```
+AskUserQuestion({
+  questions: [{
+    question: "Which framework should I build this with?",
+    header: "Framework",
+    multiSelect: false,
+    options: [
+      { label: "Vanilla HTML + Tailwind (Recommended)", description: "Zero setup, instant preview, single index.html" },
+      { label: "Next.js + Tailwind", description: "Full-stack React, App Router, production-ready" },
+      { label: "Astro + Tailwind", description: "Content-first, minimal JS, fast static sites" },
+      { label: "React + Vite + Tailwind", description: "SPA, lightweight, modern React stack" }
+    ]
+  }]
+})
+```
 
-If a framework is already detected in the project, note it: "I see you're using [framework]. I'll build with that unless you want something different."
+Adjust the 4 framework options based on the brief — these aren't fixed. Other valid picks: Vue, Nuxt, Svelte/SvelteKit, Solid.
+
+If a framework is already detected in the project, skip the question entirely: "I see you're using [framework]. I'll build with that unless you want something different — let me know."
 
 Load `references/framework-starters.md` for initialization commands and boilerplate.
 
@@ -350,12 +429,22 @@ After presenting the design:
 
 ### Step 1: Ask for Variation Count
 
-> How many variations should I explore?
->
-> a) 2 — focused A/B comparison
-> b) 3 — broader exploration
-> c) 4 — maximum breadth (takes longer)
-> d) Other number
+**Use AskUserQuestion**:
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "How many variations should I explore in parallel?",
+    header: "Variations",
+    multiSelect: false,
+    options: [
+      { label: "2 (Recommended)", description: "Focused A/B comparison — fast, easy to decide" },
+      { label: "3", description: "Broader exploration — more options" },
+      { label: "4", description: "Maximum breadth — takes longer, uses more context" }
+    ]
+  }]
+})
+```
 
 ### Step 2: Define Variation Directives
 
@@ -433,6 +522,7 @@ After all sub-agents complete, the harness returns each worktree's path and bran
 
 ## Important
 
+- **Use AskUserQuestion for every prompt.** Load it once via ToolSearch at the start of the session, then use it for reference intake, discovery questions, framework selection, and variation count. Markdown blockquote prompts are the fallback only.
 - **Never skip discovery.** Even a brief questioning round produces dramatically better designs than jumping straight to code. The only exception is when the user's prompt is already comprehensive (5+ dimensions covered).
 - **Design brief is the contract.** Always persist it to `.design/brief.md`. Sub-agents during parallel exploration must follow it. Update it when the user changes direction.
 - **Commit after every milestone.** This gives the user rollback points and makes parallel exploration possible.
