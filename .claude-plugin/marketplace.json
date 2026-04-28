@@ -6,12 +6,12 @@
   },
   "metadata": {
     "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
-    "version": "1.3.0"
+    "version": "1.4.0"
   },
   "plugins": [
     {
       "name": "code-reviewer",
-      "description": "Lean code reviews with scope discipline and LaFollett Labs patterns",
+      "description": "PE-powered code reviews with three-pass protocol (Architecture → Quality+Tests → Security) and project bootstrapping via init-project",
       "source": "./plugins/code-reviewer",
       "category": "developer-tools",
       "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"

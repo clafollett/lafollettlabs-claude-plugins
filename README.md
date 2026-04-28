@@ -6,16 +6,22 @@ Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.co
 
 | Plugin | Purpose | Details |
 | ------ | ------- | ------- |
-| [code-reviewer](./plugins/code-reviewer/skills/code-reviewer/) | Lean, scope-focused code reviews | [README](./plugins/code-reviewer/skills/code-reviewer/README.md) |
+| [code-reviewer](./plugins/code-reviewer/skills/code-reviewer/) | PE-powered code reviews + project bootstrapping | [README](./plugins/code-reviewer/skills/code-reviewer/README.md) |
 | [context-handoff](./plugins/context-handoff/) | Session state handoff and resume with prior-session deduplication | [Commands](./plugins/context-handoff/commands/) |
 | [issue-manager](./plugins/issue-manager/) | GitHub Issue management with intent-over-implementation templates | [Skill](./plugins/issue-manager/skills/issue-manager/SKILL.md) |
 | [session-analyzer](./plugins/session-analyzer/) | Analyze and extract conversations from Claude Code session JSONL files | [Skill](./plugins/session-analyzer/skills/session-analyzer/SKILL.md) |
 
-**code-reviewer** — Lean, pragmatic code reviews
+**code-reviewer** — PE-powered code reviews
 
-- Right-sized reviews (primary agent for small, sub-agents for large)
+- **`/code-reviewer`** — Three-pass review protocol: Architecture → Quality+Tests → Security
+- **`/init-project`** — Auto-detect stacks, generate `.code-reviewer.yml` + PE references
+- PE sub-agents per stack (Backend, Frontend, DevOps) with domain expertise and test execution
+- Right-sized reviews (primary agent < 200 lines, PE sub-agents for larger)
 - Scope discipline (In Scope vs Out of Scope findings)
+- Strict verdicts: MEDIUM and above block merge
+- Multi-round review support with appended findings
 - Consolidated reports at `./docs/code-reviews/`
+- Project-agnostic: works with Go, Vue, React, CDK, Terraform, Rust, Python, Java, C#, and more
 
 ### context-handoff
 
@@ -89,6 +95,16 @@ cp -r plugins/session-analyzer/skills/session-analyzer .claude/skills/
 .claude-plugin/
   marketplace.json              # Marketplace registry
 plugins/
+  code-reviewer/                # Plugin: PE-powered code reviews
+    .claude-plugin/plugin.json
+    skills/
+      code-reviewer/            # Review engine
+        SKILL.md
+        assets/                 # Report template
+        references/             # PE reference files (pe-backend, pe-frontend, pe-devops)
+      init-project/             # Project bootstrapper
+        SKILL.md
+        assets/                 # .code-reviewer.yml template
   context-handoff/              # Plugin: session handoff + resume
     .claude-plugin/plugin.json
     commands/
