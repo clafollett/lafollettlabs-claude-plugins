@@ -92,7 +92,11 @@ All design artifacts live under `.design/` (sibling of the project's `package.js
 
 ```
 .design/
-├── brief.md                              # Phase 2 — design brief, contract for sub-agents
+├── brief.md                              # Phase 2 — master design brief
+├── briefs/                               # Phase 5 — per-variation briefs (main repo only)
+│   ├── variation-a.md                    #   master brief + variation-A directive + runtime config
+│   ├── variation-b.md
+│   └── variation-c.md
 ├── shipped-direction.md                  # Post-merge — captures brief + winning directive (optional)
 └── screenshots/
     ├── {milestone}-{viewport}.png        # Phase 4 single-agent iteration
@@ -114,7 +118,9 @@ All design artifacts live under `.design/` (sibling of the project's `package.js
 - `git diff`, code review, and `find` all work predictably
 - `.design/` aligns with `brief.md`'s home — design artifacts cluster
 
-Sub-agents in Phase 5 should write screenshots to `.design/screenshots/variation-{letter}/` in their worktree. The parent reads from each worktree's `.design/screenshots/` path during convergence.
+**Per-variation briefs live in the MAIN REPO, not worktrees.** Phase 5 writes `.design/briefs/variation-{letter}.md` in the main repo before dispatching sub-agents. The harness creates each worktree from the current branch HEAD and does NOT include uncommitted files — so sub-agents must read their brief via the **absolute filesystem path** to the main repo (e.g., `/Users/foo/myproject/.design/briefs/variation-a.md`), not via a relative path inside their worktree. The dispatch prompt passes this absolute path explicitly.
+
+Sub-agents in Phase 5 write **screenshots** to their own worktree's `<worktree>/.design/screenshots/variation-{letter}/`. The parent reads from each worktree's `.design/screenshots/` path during convergence.
 
 ---
 
@@ -272,15 +278,39 @@ When the round loop exits, fill any remaining gaps with sensible defaults in the
 
 ## Phase 2 — Design Brief & Milestones
 
-### Step 1: Generate Design Brief
+### Step 1: Choose Design Approach
+
+**Always ask this proactively** — single-direction vs parallel variations is a top-level branch in the flow, not a hidden option that waits for the user to use specific keywords.
+
+Use `AskUserQuestion`:
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "Should I build one focused design, or explore multiple variations in parallel?",
+    header: "Approach",
+    multiSelect: false,
+    options: [
+      { label: "Single direction (Recommended)", description: "One cohesive design — fastest path, deepest iteration" },
+      { label: "2 variations", description: "A/B comparison — focused, easy to decide" },
+      { label: "3 variations", description: "Broader exploration — more options to choose from" },
+      { label: "4 variations", description: "Maximum breadth — takes longer, uses more context" }
+    ]
+  }]
+})
+```
+
+Record the result as `variation_count` (1, 2, 3, or 4). This drives the branch at the end of Phase 2.
+
+### Step 2: Generate Design Brief
 
 Compile all discovery answers into a design brief. Load `assets/design-brief-template.md` for the template structure.
 
-Persist the brief as `.design/brief.md` in the project root. This file survives session boundaries and serves as the contract for sub-agents during parallel exploration.
+Persist the brief as `.design/brief.md` in the project root. This file survives session boundaries and serves as the master contract for sub-agents during parallel exploration.
 
-### Step 2: Plan Milestones
+### Step 3: Plan Milestones
 
-Present milestones before generating anything:
+Present milestones before generating anything. When `variation_count > 1`, frame the milestones as "(per variation)" — each sub-agent will execute them independently in its own worktree.
 
 ```
 ## Design Milestones
@@ -298,6 +328,16 @@ Present milestones before generating anything:
 ```
 
 Ask: "Does this plan look right, or should I adjust anything before I start building?"
+
+### Step 4: Branch on variation count
+
+```
+if variation_count == 1:
+  → proceed to Phase 3 (single-build flow)
+else:
+  → skip Phase 3 single-build, jump to Phase 5 Step 2 (Define Variation Directives)
+  # variation_count is already known, so Phase 5 Step 1 is skipped
+```
 
 ---
 
@@ -505,12 +545,13 @@ After presenting the design:
 
 ### When to Trigger
 
-- User says "try a few different approaches" or "explore variations"
-- User is undecided between two visual directions
-- User explicitly asks for A/B variations
-- The design brief identifies multiple viable styles the user cannot choose between
+- **Default path when the user picked 2-4 variations during Phase 2 Step 1.** Phase 5 runs because it was chosen up front; jump straight to Step 2 (variation count is already known, Step 1 is skipped).
+- Mid-flight pivot — user initially picked "Single direction" but later says "try a few different approaches", asks for A/B variations, or is undecided between two visual directions. Use Step 1 below to capture the count, then continue.
+- The design brief identifies multiple viable styles the user cannot choose between.
 
-### Step 1: Ask for Variation Count
+### Step 1: Ask for Variation Count (fallback only)
+
+Skip this step if the user already answered Phase 2 Step 1 with a variation count > 1 — the count is already known. Use this **only** for mid-flight pivots where the user originally chose "Single direction" but now wants to explore variations.
 
 **Use AskUserQuestion**:
 
@@ -529,15 +570,43 @@ AskUserQuestion({
 })
 ```
 
-### Step 2: Define Variation Directives
+### Step 2: Define Variation Directives & Write Per-Variation Briefs
 
-For each variation, define a specific visual direction. Example for 3 variations:
+**2a. Define directives.** For each variation, define a specific visual direction. Example for 3 variations:
 
 - **Variation A**: "Dark mode with neon accents, immersive animations"
 - **Variation B**: "Light and airy, minimal with lots of whitespace"
 - **Variation C**: "Bold and colorful, playful with rounded shapes"
 
-Present the directives to the user for approval before spawning agents.
+Present the directives to the user for approval.
+
+**2b. Write per-variation brief files in the MAIN REPO** at `.design/briefs/variation-{letter}.md`. These files are the contract each sub-agent reads (via absolute path — see Step 3). They live in the main repo, NOT in the worktrees, because the harness creates worktrees from the current branch HEAD and uncommitted files don't appear there.
+
+Each brief file follows this structure:
+
+```markdown
+# Variation {LETTER}
+
+## Master Brief
+
+{verbatim copy of .design/brief.md — keep self-contained so the sub-agent never needs to follow include paths}
+
+## Variation Direction
+
+{the directive for this variation, e.g., "Dark mode with neon accents and immersive scroll animations"}
+
+## Runtime Config
+
+- **Dev server port:** {A=4321, B=4322, C=4323, D=4324}
+- **Feature flags / env vars:** {list any PUBLIC_*/VITE_*/NEXT_PUBLIC_* env vars discovered in Phase 1 Step 2 that gate UI states — sub-agent must set them when running `npm run dev` so dev-time UI renders correctly}
+- **Project subdirectory:** {if monorepo, the subdir within the worktree where the project lives, e.g., `web/`}
+
+## Differentiator
+
+{1-2 sentence statement of what makes this variation distinct from siblings — used by the parent during convergence to compare}
+```
+
+After writing the brief files, present the file paths to the user briefly so they can preview/edit before dispatch.
 
 ### Step 3: Dispatch Sub-Agents in Isolated Worktrees
 
@@ -552,21 +621,28 @@ else:
   use_teams = false
 ```
 
+**Resolve the absolute brief path before dispatch.** The sub-agent's worktree is a fresh checkout that does NOT contain uncommitted files. Pass the brief's absolute path in the main repo so the sub-agent can read it from outside its worktree:
+
+```
+main_repo_path = `git rev-parse --show-toplevel`  # e.g., /Users/foo/myproject
+brief_abs_path = "{main_repo_path}/.design/briefs/variation-{letter}.md"
+```
+
 **Spawn — single message, multiple Agent calls (parallel execution):**
 
 ```
 for each variation in [A, B, C, ...]:
   Agent(
-    subagent_type: "general-purpose",
-    name: "design-variation-{letter}",
-    team_name: "design-exploration"  # ONLY if use_teams
-    isolation: "worktree",            # harness creates the worktree, returns branch + path
+    subagent_type: "ux-designer:design-engineer",
+    name: "design-variation-{letter}",          # for SendMessage targeting
+    team_name: "design-exploration",            # ONLY if use_teams
+    isolation: "worktree",                      # harness creates the worktree, returns branch + path
     run_in_background: true,
-    prompt: <skill prompt template — see below>
+    prompt: <short dispatch prompt — see below>
   )
 ```
 
-Do **NOT** create worktrees manually — `isolation: "worktree"` already handles that. Do **NOT** use a custom engineer agent type if your project's gitflow rules conflict with `isolation: "worktree"` — `general-purpose` is the safe default for design exploration.
+Do **NOT** create worktrees manually — `isolation: "worktree"` already handles that.
 
 **Mid-flight updates:**
 
@@ -576,43 +652,18 @@ SendMessage(to: "design-variation-{letter}", message: "<update>")
 # Agent Teams: reliable; ad-hoc named Agents: best-effort
 ```
 
-**Browser tools are SHARED, not per-agent:** Playwright MCP exposes ONE browser instance per session. Sub-agents trying to use it concurrently will serialize or collide. **Sub-agents must NOT call Playwright tools in this skill.** Visual verification (M8) happens in Step 4 (Convergence), driven by the parent agent serially per variation.
+**Browser tools are SHARED, not per-agent:** Playwright MCP exposes ONE browser instance per session. Sub-agents trying to use it concurrently will serialize or collide. **Sub-agents must NOT call Playwright tools in this skill.** Visual verification (M8) happens in Step 4 (Convergence), driven by the parent agent serially per variation. The `design-engineer` agent's system prompt enforces this.
 
-**Prompt template for each sub-agent:**
+**Short dispatch prompt** (the agent's system prompt at `plugins/ux-designer/agents/design-engineer.md` carries the contract — commit format, screenshot paths, no-Playwright-MCP rule, autonomous-work rules, reporting format. The dispatch only needs to provide inputs):
 
-```markdown
-You are a UX designer creating variation {LETTER} of a design. You are running in an isolated git worktree — work here, commit here, and the parent agent will merge your branch.
+```
+You are design-engineer. Your inputs:
+- Brief: {absolute path to main repo}/.design/briefs/variation-{letter}.md
+- Worktree: <your CWD — set by isolation: "worktree">
+- Project subdirectory: {if monorepo, e.g., "web/"; otherwise omit}
+- Variation letter: {a|b|c|d}
 
-## Design Brief
-{paste the full contents of .design/brief.md}
-
-## Your Variation Direction
-{variation-specific directive — e.g., "Dark mode with neon accents and immersive scroll animations"}
-
-## Working Directory
-{tell the agent where the actual project root is — e.g., `web/` for a marketing site in a monorepo. Include port assignment for dev server if running multiple variations: A=4321, B=4322, C=4323.}
-
-## Feature Flags / Env Vars
-{list any PUBLIC_*/VITE_*/NEXT_PUBLIC_* env vars discovered in Phase 1 Step 2 that gate UI states. Tell the agent to set them when running `npm run dev` so dev-time UI renders correctly.}
-
-## Screenshot Output Path
-
-If you capture screenshots (via raw Node + project-installed Playwright — NOT the Playwright MCP, see Instructions §5), save them to `<project_root>/.design/screenshots/variation-{letter}/` with the filename pattern `{page}-{viewport}.png`. Examples: `home-desktop.png`, `contact-mobile.png`. This is the canonical path the parent agent reads during convergence.
-
-## Instructions
-1. Follow the milestones from the brief in order
-2. Use the framework specified in the brief
-3. Commit after each milestone with message: "design(variation-{letter}): {milestone description}"
-4. If Storybook is part of the brief, generate stories for each component you build
-5. **Do NOT call the Playwright MCP** (`mcp__playwright__browser_*`). The MCP exposes ONE shared browser per session — parallel sub-agents collide. If you need screenshots, use raw Node with the project's `@playwright/test` install (or `npx playwright install chromium` first if not present): write a small script that launches its own browser, navigates, and saves to the canonical path above. Otherwise skip M8 and let the parent agent capture during convergence.
-6. **Work autonomously — you cannot interact with the user.** AskUserQuestion is not available to sub-agents. If you hit a genuinely blocking ambiguity, stop and report it back instead of guessing. Minor judgment calls are yours.
-7. When all milestones are complete, report:
-   - Branch name (run `git branch --show-current`)
-   - Worktree path (run `pwd` from the worktree root)
-   - 2-3 sentence summary of your approach
-   - What makes this variation distinct
-   - Path to screenshots if captured (`<project_root>/.design/screenshots/variation-{letter}/`)
-   - Any blockers, gaps, or judgment calls the user should know about
+Read your brief and execute. Report back per your standard reporting format.
 ```
 
 ### Step 4: Convergence
@@ -681,7 +732,7 @@ on all sub-agents complete:
 
 - **Use AskUserQuestion for every prompt.** Load it once via ToolSearch at the start of the session, then use it for reference intake, discovery questions, framework selection, and variation count. Markdown blockquote prompts are the fallback only.
 - **Never skip discovery.** Even a brief questioning round produces dramatically better designs than jumping straight to code. The only exception is when the user's prompt is already comprehensive (5+ dimensions covered).
-- **Design brief is the contract.** Always persist it to `.design/brief.md`. Sub-agents during parallel exploration must follow it. Update it when the user changes direction.
+- **Design brief is the contract.** Always persist the master brief to `.design/brief.md`. For parallel exploration, write per-variation briefs to `.design/briefs/variation-{letter}.md` (Phase 5 Step 2) and pass each sub-agent the absolute path to its brief — worktrees don't include uncommitted files. Update briefs when the user changes direction.
 - **Commit after every milestone.** This gives the user rollback points and makes parallel exploration possible.
 - **Playwright is optional.** The skill must work without it. When unavailable, guide the user to check their browser and provide text feedback.
 - **Storybook is optional.** Only initialize or use it when the project already has it or the user explicitly requests it. Don't add Storybook to a simple landing page unless asked.
