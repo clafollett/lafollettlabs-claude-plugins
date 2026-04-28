@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: This skill should be used when performing code reviews, PR reviews, reviewing code changes, or analyzing code quality. Uses right-sized review approach — primary agent handles small changes directly, dispatches stack-specific PE sub-agents (pe-backend, pe-frontend, pe-devops) for larger reviews. Focuses only on changed code with scope discipline. Produces de-duplicated, actionable findings in ./docs/code-reviews/.
+description: This skill should be used when performing code reviews, PR reviews, reviewing code changes, or analyzing code quality. Routes by Stack Map — dispatches stack-specific PE sub-agents (pe-backend, pe-frontend, pe-devops) per matched stack regardless of diff size; falls back to a generic three-pass review only when no PE matches. Focuses only on changed code with scope discipline. Locks each round to the reviewed SHA so post-approval commits invalidate prior approval. Produces de-duplicated, actionable findings in ./docs/code-reviews/.
 ---
 
 # Expert Code Review
@@ -62,19 +62,25 @@ else:
   ask user for a short descriptive name
 ```
 
-### Review Sizing
+### PE Routing
 
 ```bash
-git diff main...HEAD --stat | tail -1          # branch reviews
-git diff <target>...<source> --stat | tail -1  # PR reviews
+git diff main...HEAD --stat | tail -1          # branch reviews (informational)
+git diff <target>...<source> --stat | tail -1  # PR reviews (informational)
 ```
 
 ```
-if lines_changed < 200:
-  approach = "primary"            # parent runs all three passes directly
+matching_pes = PEs whose Stack Map paths intersect with files in the diff
+
+if matching_pes is empty:
+  approach = "generic"     # primary runs generic three-pass (no PE expertise available)
+elif len(matching_pes) == 1:
+  approach = "single_pe"   # dispatch the one matching PE
 else:
-  approach = "dispatch"            # parent dispatches stack-specific PE sub-agent(s)
+  approach = "multi_pe"    # dispatch all matching PEs in parallel
 ```
+
+Diff size is informational only. Domain expertise is the constant — every review touching a stack with a matching PE dispatches that PE, regardless of line count.
 
 ---
 
@@ -146,19 +152,28 @@ Pass 3 — Security: top 1% strict. OWASP Top 10, auth, secrets, injection,
                    probably fine?". Assume an attacker is reading the diff.
 ```
 
-### Right-sizing
+### Dispatch
 
 ```
-if approach == "primary" (< 200 lines changed):
-  parent runs all three passes directly using its own judgment +
-  the Stack Map's test commands. No sub-agent dispatch.
+match approach:
+  case "generic":
+    # No matching PE — primary runs all three passes directly
+    # using its own judgment + Stack Map's test commands.
+    no sub-agent dispatch
 
-elif approach == "dispatch" (≥ 200 lines):
-  for each matching PE subagent (in parallel — single message, multiple Agent calls):
+  case "single_pe":
     Agent(
-      subagent_type: "code-reviewer:pe-{stack}",   # pe-backend, pe-frontend, pe-devops
+      subagent_type: "code-reviewer:pe-{stack}",
       prompt: <dispatch input — see below>
     )
+
+  case "multi_pe":
+    # Dispatch all matching PEs in parallel — single message, multiple Agent calls.
+    for each pe in matching_pes:
+      Agent(
+        subagent_type: "code-reviewer:pe-{stack}",
+        prompt: <dispatch input filtered to this PE's domain>
+      )
 ```
 
 ### Dispatch Input
@@ -238,17 +253,35 @@ Never publish a CRITICAL/HIGH without a second look.
 ### Step 2: Write or Append
 
 ```
+reviewed_sha = git rev-parse HEAD     # capture BEFORE writing
+
 if file does NOT exist:
   write full report using assets/summary-report-template.md
-  populate Reviewer (`git config user.name`), Review Round (1),
-  PR fields (number, URL, author — PR reviews only)
+  populate:
+    Reviewer       (`git config user.name`)
+    Review Round   (1)
+    Reviewed SHA   (reviewed_sha)
+    PR fields      (number, URL, author — PR reviews only)
 
 elif file exists (previous review):
   read existing file
-  count `## Review Round` headings → next round number
-  (no round heading = implicit Round 1)
-  append new Review Round section before the `Generated with Claude Code` footer
-  update top-level Verdict to reflect latest round
+  prior_sha = SHA recorded in latest round's "Reviewed SHA" field
+  prior_verdict = top-level Verdict of latest round
+
+  if prior_sha == reviewed_sha:
+    # No new commits since last review.
+    REFUSE: "No changes since round N (SHA {prior_sha}). Re-running adds no signal — abort."
+
+  else:
+    # New commits since last review.
+    count `## Review Round` headings → next_round_number = N + 1
+    if prior_verdict == "✅ APPROVED":
+      round_header_note = "🚫 PRIOR ROUND INVALIDATED — re-reviewing post-approval changes"
+    else:
+      round_header_note = (none — standard remediation round)
+    append new Review Round section before the `Generated with Claude Code` footer
+    populate Reviewed SHA = reviewed_sha
+    update top-level Verdict to reflect latest round
 ```
 
 See `assets/summary-report-template.md` for exact format.

@@ -9,6 +9,7 @@
 | **Author** | @{pr-author} |
 | **Reviewer** | @{reviewer} |
 | **Review Round** | 1 |
+| **Reviewed SHA** | `{full-sha}` |
 | **Title** | {Brief description} |
 | **Files Changed** | {count} |
 | **Lines Changed** | +{added} / -{removed} |
@@ -106,10 +107,21 @@
 | `{path/to/file}` | {count} |
 | `{path/to/file}` | {count} |
 
+---
+
+## Merge Eligibility
+
+**Locked to SHA:** `{full-sha}`
+**Status:** ✅ Mergeable IF `git rev-parse HEAD == {full-sha}`. Any commit after this SHA invalidates this round and requires re-review (`/code-reviewer` again before merge).
+
 <!--
 MULTI-ROUND REVIEWS: When appending subsequent reviews, add the following
 section before this footer. Increment the round number. Update the top-level
-Verdict to match the latest round.
+Verdict to match the latest round. Update Merge Eligibility above to lock to
+the LATEST round's SHA.
+
+If the prior round was ✅ APPROVED and new commits exist, prepend the round
+heading with: "🚫 PRIOR ROUND INVALIDATED — re-reviewing post-approval changes"
 
 ---
 
@@ -120,6 +132,7 @@ Verdict to match the latest round.
 | | |
 | - | - |
 | **Reviewer** | @{reviewer} |
+| **Reviewed SHA** | `{full-sha}` |
 | **Date** | {YYYY-MM-DD} |
 
 ### Summary
