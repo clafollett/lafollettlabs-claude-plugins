@@ -643,20 +643,30 @@ else:
 
 **Resolve the absolute brief path before dispatch.** The sub-agent's worktree is a fresh checkout that does NOT contain uncommitted files. Pass the brief's absolute path in the main repo so the sub-agent can read it from outside its worktree.
 
-`.design/` is a sibling of the project's `package.json` (per Canonical Paths). For a single-project repo that's the git toplevel; for a monorepo where the design target lives in a subdir (e.g., `web/`), `.design/` lives in that subdir, NOT at the git root. Resolve accordingly:
+`.design/` is a sibling of the project's `package.json` (per Canonical Paths). For a single-project repo that's the git toplevel; for a monorepo where the design target lives in a subdir (e.g., `web/`), `.design/` lives in that subdir. Derive `project_root_abs` by locating the `.design/brief.md` file Phase 2 already wrote — no need to guess subdir layout:
 
+```bash
+git_toplevel = `git rev-parse --show-toplevel`             # e.g., /Users/foo/myproject
+
+# Find where Phase 2 wrote brief.md. Bounded depth, skip node_modules + worktrees.
+brief_master = `find "$git_toplevel" -maxdepth 4 -path "*/.design/brief.md" \
+                  -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null | head -1`
+
+if [ -z "$brief_master" ]; then
+  abort("Phase 2 brief.md not found — Phase 2 Step 2 must run before Phase 5 dispatch")
+fi
+
+project_root_abs = `dirname $(dirname "$brief_master")`    # strips /.design/brief.md
+project_subdir   = "${project_root_abs#$git_toplevel/}"    # bash strips git_toplevel/ prefix; portable (no GNU realpath needed)
+[ "$project_subdir" = "$project_root_abs" ] && project_subdir="."
+                                                           # "." for single-project (no prefix stripped), "web" for monorepo subdir
+brief_abs_path   = "{project_root_abs}/.design/briefs/variation-{letter}.md"
+
+# Sanity-check before dispatch — fail loudly if the per-variation brief is missing:
+test -f "{brief_abs_path}" || abort("variation brief missing at {brief_abs_path} — Phase 5 Step 2b didn't write it")
 ```
-git_toplevel       = `git rev-parse --show-toplevel`           # e.g., /Users/foo/myproject
-project_subdir     = "" if .design/ is at git_toplevel
-                     else "<subdir>" (e.g., "web") if monorepo with target in a subdir
-project_root_abs   = git_toplevel + ("/" + project_subdir if project_subdir else "")
-brief_abs_path     = "{project_root_abs}/.design/briefs/variation-{letter}.md"
 
-# Sanity-check before dispatch — fail loudly if the file isn't where expected:
-test -f "{brief_abs_path}" || abort("brief missing — wrote to wrong project_root?")
-```
-
-Pass `project_subdir` to the sub-agent too, so its dev-server commands and screenshot paths target the same location.
+Pass `project_subdir` to the sub-agent too (omit when `.`), so its dev-server commands and screenshot paths target the same location.
 
 **Spawn — single message, multiple Agent calls (parallel execution):**
 
