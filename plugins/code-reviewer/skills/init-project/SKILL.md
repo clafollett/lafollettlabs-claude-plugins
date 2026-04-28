@@ -1,12 +1,18 @@
 ---
 name: init-project
-description: Scan the current project and generate a Stack Map + PE references for the code-reviewer skill. Detects languages, frameworks, test commands, and directory structure automatically.
+description: Scan the current project and initialize CLAUDE.md with a Stack Map for the code-reviewer skill. Detects languages, frameworks, test commands, and directory structure automatically. Built-in PE sub-agents (pe-backend, pe-frontend, pe-devops) ship with the plugin — this skill does NOT generate per-project PE files.
 ---
 
 # Initialize Project for Code Review
 
 Bootstraps the `/code-reviewer` skill into any project by scanning the repo
-and generating configuration automatically.
+and writing a Stack Map into the project's `CLAUDE.md` (or `.code-reviewer.yml`).
+
+The three built-in PE sub-agents — `code-reviewer:pe-backend`,
+`code-reviewer:pe-frontend`, `code-reviewer:pe-devops` — ship with the plugin
+as proper agents. This skill does NOT regenerate them. For stacks not covered
+by a built-in PE (Rust, Python, Java, C#, etc.), the code-reviewer skill falls
+back to a generic three-pass review using the Stack Map's test commands.
 
 ---
 
@@ -16,22 +22,24 @@ Scan the repository for language markers, build files, and framework configs.
 
 ### Language Detection
 
-| Marker | Stack | Default PE |
-| - | - | - |
-| `go.mod`, `*.go` | Go | PE-Backend |
-| `package.json` + `*.vue` | Vue/Nuxt | PE-Frontend |
-| `package.json` + `*.tsx`/`*.jsx` | React | PE-Frontend |
-| `package.json` + `*.svelte` | Svelte | PE-Frontend |
-| `cdk.json`, `*.ts` in `cdk/` or `infra/` | AWS CDK | PE-DevOps |
-| `cdktf.json` | CDKTF | PE-DevOps |
-| `*.tf` | Terraform | PE-DevOps |
-| `Cargo.toml`, `*.rs` | Rust | PE-Backend |
-| `pyproject.toml`, `requirements.txt`, `*.py` | Python | PE-Backend |
-| `*.java`, `pom.xml`, `build.gradle` | Java | PE-Backend |
-| `*.cs`, `*.csproj`, `*.sln` | C# / .NET | PE-Backend |
-| `Dockerfile*`, `docker-compose*` | Docker | PE-DevOps |
-| `.github/workflows/*.yml` | GitHub Actions CI/CD | PE-DevOps |
-| `.gitlab-ci.yml` | GitLab CI/CD | PE-DevOps |
+The "Built-in PE" column maps a detected stack to one of the three plugin-shipped agents (`pe-backend`, `pe-frontend`, `pe-devops`). "Generic" means no built-in agent matches — code-reviewer falls back to a generic three-pass review for that stack.
+
+| Marker | Stack | Built-in PE |
+| --- | --- | --- |
+| `go.mod`, `*.go` | Go | `pe-backend` |
+| `package.json` + `*.vue` | Vue/Nuxt | `pe-frontend` |
+| `package.json` + `*.tsx`/`*.jsx` | React | `pe-frontend` |
+| `package.json` + `*.svelte` | Svelte | `pe-frontend` |
+| `cdk.json`, `*.ts` in `cdk/` or `infra/` | AWS CDK | `pe-devops` |
+| `cdktf.json` | CDKTF | `pe-devops` |
+| `*.tf` | Terraform | `pe-devops` |
+| `Dockerfile*`, `docker-compose*` | Docker | `pe-devops` |
+| `.github/workflows/*.yml` | GitHub Actions CI/CD | `pe-devops` |
+| `.gitlab-ci.yml` | GitLab CI/CD | `pe-devops` |
+| `Cargo.toml`, `*.rs` | Rust | Generic |
+| `pyproject.toml`, `requirements.txt`, `*.py` | Python | Generic |
+| `*.java`, `pom.xml`, `build.gradle` | Java | Generic |
+| `*.cs`, `*.csproj`, `*.sln` | C# / .NET | Generic |
 
 ### Framework Detection
 
@@ -118,47 +126,39 @@ Generate a Stack Map table and prompt the user to add it to their `CLAUDE.md`:
 ```markdown
 ## Stack Map
 
-| Path | Stack | PE | Test Command |
-| - | - | - | - |
-| lambdas/**, pkg/** | Go | PE-Backend | `go vet ./... && go test ./... -count=1 -race` |
-| crew/** | Vue/Nuxt | PE-Frontend | `cd crew && npm run typecheck && npm test` |
-| cdk/** | CDK TypeScript | PE-DevOps | `cd cdk && npm test && npx cdk synth --all` |
+| Path | Stack | Built-in PE | Test Command |
+| --- | --- | --- | --- |
+| lambdas/**, pkg/** | Go | `pe-backend` | `go vet ./... && go test ./... -count=1 -race` |
+| crew/** | Vue/Nuxt | `pe-frontend` | `cd crew && npm run typecheck && npm test` |
+| cdk/** | CDK TypeScript | `pe-devops` | `cd cdk && npm test && npx cdk synth --all` |
+| api/** | Python | Generic | `cd api && pytest` |
 ```
 
-### 5b: PE Reference Files
+The "Built-in PE" column drives `code-reviewer` dispatch. `Generic` rows are reviewed by the parent skill directly using the listed test command (no PE sub-agent dispatch).
 
-For each detected PE type, generate a reference file at
-`references/pe-<type>.md` with:
+### 5b: Summary Report
 
-- Frontmatter (`name`, `activates_on` file extensions)
-- Test commands (from Phase 3)
-- Three-pass protocol skeleton (Architecture → Quality+Tests → Security)
-- Framework-specific checklist items
-- Domain expertise summary
-
-**Do NOT overwrite existing PE references** — merge new patterns into existing
-files, or offer the user a diff.
-
-### 5c: Summary Report
-
-Print a summary of what was detected and generated:
+Print a summary of what was detected and where things went:
 
 ```
 === Project Initialized for Code Review ===
 
 Stacks detected:
-  - Go (PE-Backend): lambdas/, pkg/
-  - Vue/Nuxt (PE-Frontend): crew/
-  - CDK TypeScript (PE-DevOps): cdk/
-  - CDKTF TypeScript (PE-DevOps): cloudflare/
-  - GitHub Actions (PE-DevOps): .github/workflows/
+  - Go (pe-backend):       lambdas/, pkg/
+  - Vue/Nuxt (pe-frontend): crew/
+  - CDK TypeScript (pe-devops):    cdk/
+  - CDKTF TypeScript (pe-devops):  cloudflare/
+  - GitHub Actions (pe-devops):    .github/workflows/
 
-PE references generated:
-  - references/pe-backend.md (Go, SQL)
-  - references/pe-frontend.md (Vue, Nuxt, Tailwind, Storybook)
-  - references/pe-devops.md (CDK, CDKTF, GitHub Actions)
+Stack Map written to: CLAUDE.md (or .code-reviewer.yml if preferred)
 
-Stack Map ready — add to your CLAUDE.md or .code-reviewer.yml
+Built-in PE sub-agents that will be dispatched:
+  - code-reviewer:pe-backend  (ships with plugin)
+  - code-reviewer:pe-frontend (ships with plugin)
+  - code-reviewer:pe-devops   (ships with plugin)
+
+Stacks NOT covered by a built-in PE:
+  - {if any} Python (api/), Rust (engine/) → generic three-pass review
 
 Run /code-reviewer to start reviewing!
 ```
@@ -167,12 +167,14 @@ Run /code-reviewer to start reviewing!
 
 ## Edge Cases
 
-- **Monorepo with many stacks:** Generate one PE per unique stack, map all
-  directories. The code-reviewer skill handles multi-PE diffs.
-- **Unknown language:** Fall back to a generic review (Architecture → Quality →
-  Security) without stack-specific test commands. Suggest the user create a
-  custom PE reference.
-- **No tests found:** Flag it as a finding in the summary — "No test command
-  detected for <stack>. Consider adding tests."
-- **Existing PE references:** Merge, don't overwrite. Show the user what would
+- **Monorepo with many stacks:** map every directory in the Stack Map. The
+  code-reviewer skill dispatches one PE sub-agent per matched stack in parallel.
+- **Stack not covered by a built-in PE** (Rust, Python, Java, C#, etc.): record
+  the stack + test command in the Stack Map. The code-reviewer skill falls back
+  to a generic three-pass review using those test commands. Do NOT generate a
+  per-project PE file — the plugin's three built-in agents are the only PEs.
+- **No tests found:** flag it in the summary — "No test command detected for
+  <stack>. Consider adding tests." Add a `# TODO` line in the Stack Map's test
+  command column rather than guessing.
+- **Existing Stack Map:** merge, don't overwrite. Show the user what would
   change and let them decide.

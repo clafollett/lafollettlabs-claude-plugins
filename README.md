@@ -15,14 +15,17 @@ Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.co
 **code-reviewer** — PE-powered code reviews
 
 - **`/code-reviewer`** — Three-pass review protocol: Architecture → Quality+Tests → Security
-- **`/init-project`** — Auto-detect stacks, generate `.code-reviewer.yml` + PE references
-- PE sub-agents per stack (Backend, Frontend, DevOps) with domain expertise and test execution
+- **`/init-project`** — Auto-detect stacks and write a Stack Map into `CLAUDE.md`
+- Three built-in PE sub-agents shipped as proper agents (`claude-opus-4-7` model):
+  - `pe-backend` — Go / PostgreSQL / AWS Lambda
+  - `pe-frontend` — Vue 3 / Nuxt 3 / TypeScript / Tailwind / Storybook
+  - `pe-devops` — AWS CDK / Cloudflare CDKTF / Terraform / Docker / GitHub Actions
 - Right-sized reviews (primary agent < 200 lines, PE sub-agents for larger)
+- Generic three-pass fallback for stacks without a built-in PE (Rust, Python, Java, C#, etc.)
 - Scope discipline (In Scope vs Out of Scope findings)
 - Strict verdicts: MEDIUM and above block merge
 - Multi-round review support with appended findings
 - Consolidated reports at `./docs/code-reviews/`
-- Project-agnostic: works with Go, Vue, React, CDK, Terraform, Rust, Python, Java, C#, and more
 
 ### context-handoff
 
@@ -114,12 +117,15 @@ cp -r plugins/session-analyzer/skills/session-analyzer .claude/skills/
 plugins/
   code-reviewer/                # Plugin: PE-powered code reviews
     .claude-plugin/plugin.json
+    agents/
+      pe-backend.md             # Go/PostgreSQL/Lambda reviewer (claude-opus-4-7)
+      pe-frontend.md            # Vue/Nuxt/TS reviewer (claude-opus-4-7)
+      pe-devops.md              # CDK/CDKTF/IaC reviewer (claude-opus-4-7)
     skills/
-      code-reviewer/            # Review engine
+      code-reviewer/            # Review engine — orchestrates dispatch + consolidates findings
         SKILL.md
         assets/                 # Report template
-        references/             # PE reference files (pe-backend, pe-frontend, pe-devops)
-      init-project/             # Project bootstrapper
+      init-project/             # Stack Map bootstrapper
         SKILL.md
         assets/                 # .code-reviewer.yml template
   context-handoff/              # Plugin: session handoff + resume

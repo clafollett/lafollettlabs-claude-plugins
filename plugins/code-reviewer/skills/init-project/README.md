@@ -1,30 +1,28 @@
 # init-project
 
-Bootstraps the `/code-reviewer` skill into any project. Scans the repo,
-detects languages/frameworks/test commands, and generates configuration
-automatically.
+Initializes the `/code-reviewer` skill in a project by writing a Stack Map into `CLAUDE.md` (or `.code-reviewer.yml`). Detects languages, frameworks, and test commands so the parent reviewer knows which built-in PE sub-agent to dispatch per path.
+
+The three built-in PE sub-agents — `pe-backend`, `pe-frontend`, `pe-devops` — ship with the plugin as proper agents. **This skill does NOT generate per-project PE files.**
 
 ## What It Does
 
 1. **Detects stacks** — Go, Vue, React, CDK, Terraform, Rust, Python, Java, C#, Docker, CI/CD
-2. **Maps directories** — which paths belong to which stack and PE type
+2. **Maps directories** — which paths belong to which stack
 3. **Finds test commands** — reads `package.json` scripts, `Makefile` targets, or uses stack defaults
-4. **Generates PE references** — one per detected stack with activation patterns, test commands, and three-pass review protocol
-5. **Writes `.code-reviewer.yml`** — project-level config with Stack Map and settings
-6. **Suggests `CLAUDE.md` additions** — Stack Map table for the project instructions
+4. **Writes Stack Map to `CLAUDE.md`** — single source of truth for path → stack → PE → test command
+5. **Optionally writes `.code-reviewer.yml`** — machine-readable equivalent for the parent skill
 
 ## Usage
 
 ```text
 You: /init-project
-Claude: [Scans repo, generates config, creates PE references]
+Claude: [Scans repo, writes Stack Map to CLAUDE.md, prints summary]
 ```
 
 ## Output
 
-- `.code-reviewer.yml` — project config with Stack Map
-- `references/pe-*.md` — PE reference files for each detected stack
-- Summary of what was detected and generated
+- Stack Map appended to `CLAUDE.md` (or `.code-reviewer.yml` if preferred)
+- Summary of detected stacks and which built-in PE will review each (or `Generic` for fallback)
 
 ## Supported Stacks
 

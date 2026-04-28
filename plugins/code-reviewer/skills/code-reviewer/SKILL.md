@@ -1,229 +1,186 @@
 ---
 name: code-reviewer
-description: This skill should be used when performing code reviews, PR reviews, reviewing code changes, or analyzing code quality. Uses right-sized review approach - primary agent handles small changes directly, sub-agents for larger reviews. Focuses only on changed code with scope discipline. Produces de-duplicated, actionable findings in ./docs/code-reviews/.
+description: This skill should be used when performing code reviews, PR reviews, reviewing code changes, or analyzing code quality. Uses right-sized review approach — primary agent handles small changes directly, dispatches stack-specific PE sub-agents (pe-backend, pe-frontend, pe-devops) for larger reviews. Focuses only on changed code with scope discipline. Produces de-duplicated, actionable findings in ./docs/code-reviews/.
 ---
 
 # Expert Code Review
 
-Lean, pragmatic code reviews with scope discipline.
+Lean, pragmatic code reviews with scope discipline. Stack-specific PE sub-agents do the heavy lifting; the parent skill orchestrates dispatch and consolidates findings.
 
 ---
 
 ## Phase 1: Scope Analysis
 
-Determine review type based on user request:
+Determine review type from the user's request:
 
 | User Request | Review Type | What to Review |
-| - | - | - |
-| "Review my branch" / "Review this PR" | **Branch Diff** | `git diff main...HEAD` |
-| GitHub PR URL or "Review PR #N" | **PR Review** | `git diff <target>...<source>` (auto-checkouts source branch) |
-| "Review staged changes" | **Staged Diff** | `git diff --cached` |
-| "Review these files: X, Y, Z" | **Specific Files** | Read and review entire files |
-| "Review the src/services folder" | **Folder** | Read and review all files in folder |
-| "Review this code" + pasted code | **Ad-hoc** | Review the provided code |
+| --- | --- | --- |
+| "Review my branch" / "Review this PR" | Branch Diff | `git diff main...HEAD` |
+| GitHub PR URL or "Review PR #N" | PR Review | `git diff <target>...<source>` (auto-checkouts source branch) |
+| "Review staged changes" | Staged Diff | `git diff --cached` |
+| "Review these files: X, Y, Z" | Specific Files | Read and review entire files |
+| "Review the src/services folder" | Folder | Read and review all files in folder |
+| "Review this code" + pasted code | Ad-hoc | Review the provided code |
 
-### For Branch/Staged Reviews
+### Branch / Staged
 
 ```bash
 git diff main...HEAD      # branch diff
 git diff --cached         # staged changes
 ```
 
-Confirm the current branch is the intended review target before proceeding.
-If on `main`, stop and ask the user which branch to review.
+```
+if current_branch == "main":
+  ask user which branch to review (do NOT proceed)
+```
 
-### For PR Reviews
+### PR
 
-1. Extract PR metadata: `gh pr view <PR_NUMBER> --json number,url,headRefName,baseRefName,author`
-   — Capture: source branch, target branch, PR number, PR URL, author
-2. Checkout source branch and pull latest:
+```bash
+gh pr view <PR_NUMBER> --json number,url,headRefName,baseRefName,author
+git checkout <source_branch>
+git pull
+git diff <target_branch>...<source_branch>
+```
 
-   ```bash
-   git checkout <source_branch>
-   git pull
-   ```
-
-3. Diff against target: `git diff <target_branch>...<source_branch>`
-4. Store PR metadata (number, URL, target branch, author) for Phase 6
+Capture: source branch, target branch, PR number, PR URL, author. Store for Phase 6.
 
 **Critical:** Review files MUST be committed to the source branch, never to main.
 
-### For Specific Files/Folders
+### Files / Folders / Ad-hoc
 
-Read the files directly. Review entire content (no diff context).
+Read the files directly. No diff context — review entire content.
 
-### Review Name
+### Review Name (used for output filename)
 
-Used for the output filename (see Phase 6). Determine from branch:
-
-1. **Issue ID in branch** → use issue ID (e.g. `983`) - Extract from branch: `git branch --show-current` → `<type>/<issue-id>-<description>`
-2. **Branch, no issue ID** → slugify branch name
-3. **On main** → ask the user for a short descriptive name
+```
+if branch matches "<type>/<issue-id>-<description>":
+  name = issue_id                 # e.g., "983"
+elif on a branch (no issue ID):
+  name = slugify(branch)          # e.g., "fix-code-reviewer-cleanup"
+else:
+  ask user for a short descriptive name
+```
 
 ### Review Sizing
-
-After determining the review type and checking out the correct branch, get diff stats:
 
 ```bash
 git diff main...HEAD --stat | tail -1          # branch reviews
 git diff <target>...<source> --stat | tail -1  # PR reviews
 ```
 
-| Lines Changed | Approach |
-| - | - |
-| **< 200** | Primary agent reviews directly |
-| **≥ 200** | Dispatch sub-agents (Security, Architecture, Code Quality) |
-
----
-
-## PE Selection
-
-Determine which PE reference(s) to load using this priority:
-
-### Priority 1: `.code-reviewer.yml` (project config)
-
-If the project root contains `.code-reviewer.yml` (generated by
-`/init-project`), read the `stacks` array. Match changed files against each
-stack's `paths` globs. Load the corresponding PE reference and use the
-configured `test_commands`.
-
-### Priority 2: `CLAUDE.md` Stack Map
-
-If no `.code-reviewer.yml` exists, check the project's `CLAUDE.md` for a
-`## Stack Map` section. Parse the table to map paths → PE types.
-
-### Priority 3: PE frontmatter `activates_on`
-
-If neither config source exists, scan PE reference files in `references/`
-for `activates_on` patterns in their frontmatter. Match against file
-extensions in the diff.
-
-```yaml
-# Example: pe-backend.md frontmatter
----
-name: PE-Backend
-activates_on: ["*.go", "go.mod", "go.sum", "*.sql"]
----
+```
+if lines_changed < 200:
+  approach = "primary"            # parent runs all three passes directly
+else:
+  approach = "dispatch"            # parent dispatches stack-specific PE sub-agent(s)
 ```
 
-### Priority 4: No PE match
-
-Fall back to a general-purpose review using the three-pass protocol directly
-(Architecture → Quality → Security) without domain-specific test commands
-or checklists.
-
 ---
 
-**Mixed diffs:** If the diff spans multiple stacks, load ALL matching PE
-references. Each PE reviews only the portions of the diff relevant to its
-domain.
+## PE Agent Selection
 
-**Read the PE reference file BEFORE reviewing.** It contains the test commands
-to run, the three-pass protocol (Architecture → Quality+Tests → Security),
-the review checklist, and domain-specific patterns to catch. The PE reference
-IS the review methodology.
+The plugin ships three built-in PE sub-agents:
 
-**Bootstrap a new project:** Run `/init-project` to auto-detect stacks,
-generate `.code-reviewer.yml`, and create PE reference files.
+| Subagent | Domain | File patterns |
+| --- | --- | --- |
+| `code-reviewer:pe-backend` | Go / PostgreSQL / AWS Lambda | `*.go`, `go.mod`, `go.sum`, `*.sql` |
+| `code-reviewer:pe-frontend` | Vue 3 / Nuxt 3 / TS / Tailwind / Storybook | `*.vue`, `*.tsx`, `*.jsx`, `tailwind.config.*`, `nuxt.config.*`, `vite.config.*`, `*.stories.*` |
+| `code-reviewer:pe-devops` | AWS CDK / Cloudflare CDKTF / Terraform / Docker / GH Actions | `cdk.json`, `*.tf`, `*.tfvars`, `Dockerfile*`, `docker-compose*`, `.github/workflows/*.yml` |
+
+Each agent has its own model (`claude-opus-4-7`), tools, and self-contained three-pass protocol — they do NOT need a reference file at runtime.
+
+### Selection Priority
+
+```
+1. .code-reviewer.yml (project config) — if it exists, read `stacks` array;
+   match changed files against each stack's `paths` globs; map to subagent.
+2. CLAUDE.md Stack Map — parse the table; map paths → stack → subagent.
+3. File pattern fallback — match diff file extensions against the table above.
+4. No match — generic three-pass review (Architecture → Quality → Security)
+   without stack-specific test commands or domain checklists.
+```
+
+**Mixed diffs:** If the diff spans multiple stacks, dispatch ALL matching PE subagents in parallel (single message, multiple Agent calls). Each PE reviews only the portion of the diff relevant to its domain.
+
+**Stacks not covered by built-in agents** (Rust, Python, Java, C#, etc.): primary agent runs the generic three-pass review directly. CLAUDE.md's Stack Map still tells the parent which paths are which stack and what test commands to run.
 
 ---
 
 ## Phase 2: Scope Discipline
 
-### For Diff-Based Reviews (Branch/Staged)
+### Diff-based reviews (Branch / Staged / PR)
 
-**In Scope** - Issues in the changed code:
+```
+in_scope = issue is in lines added/modified by the diff
+            OR in functions/types/components containing changes
 
-- Lines added/modified in the diff
-- Functions containing changes
-- New imports/dependencies
-- **Report ALL severities** (CRITICAL → INFO) for awareness
-- **Verdict based on highest severity** (CRITICAL/HIGH block, others don't)
+# Report ALL severities (CRITICAL → INFO) for awareness.
+# Verdict is based on highest severity that has in_scope = true.
+# Pre-existing issues (in_scope = false) → awareness, do NOT block PR.
+```
 
-**Out of Scope** - Pre-existing issues in unchanged code:
+### File / Folder / Ad-hoc reviews
 
-- Note them for awareness (tech debt)
-- Do NOT block the PR for pre-existing issues
-- Log to backlog, not action items
-
-### For File/Folder/Ad-hoc Reviews
-
-Everything is "in scope" - review the entire content provided. Use judgment on severity:
-
-- Focus on security and architecture issues first
-- Don't nitpick style on existing code unless explicitly asked
+```
+in_scope = true for everything provided
+# Use judgment on severity — focus on security and architecture; don't nitpick
+# style on existing code unless explicitly asked.
+```
 
 ---
 
 ## Phase 3: Review Execution
 
-### Three-Pass Protocol
+### Three-Pass Protocol (every review)
 
-Every review follows three serialized passes, defined in the PE reference file.
-Each pass builds on findings from the previous one.
-
-**Pass 1: Architecture** — SOLID, patterns, coupling, cohesion, separation of
-concerns, package/component boundaries, migration safety.
-
-**Pass 2: Quality** — Code quality + **run the test suite**. Readability, DRY,
-maintainability, idioms. Test failures are CRITICAL findings. Lint/vet warnings
-are HIGH findings. Execute the test commands from the PE reference file.
-
-**Pass 3: Security** — Top 1% strict adherence to industry standards and best
-practices. OWASP Top 10, auth, secrets, injection, supply chain. Not "is this
-probably fine" — "would this survive a pentest?" Assume an attacker is reading
-this diff.
-
-### Right-Sizing
-
-| Lines Changed | Approach |
-| - | - |
-| **< 200** | Primary agent runs all three passes directly |
-| **≥ 200** | Dispatch PE sub-agent(s) based on file types changed |
-
-### PE Sub-Agent Prompt (≥ 200 lines)
-
-```markdown
-You are {PE_TYPE} reviewing code for {ISSUE_ID}.
-
-Read references/{pe-reference}.md for your full review protocol, test
-commands, checklist, and domain expertise.
-
-SCOPE RULES:
-- ONLY review CHANGED lines in the diff
-- "in_scope: true" for issues IN the changes
-- "in_scope: false" for pre-existing issues (don't block PR)
-- Use FULL file paths from repository root (not abbreviated)
-  ✅ src/app/module/component/my-file.ts:167
-  ❌ my-file.ts:167
-
-EXECUTION:
-1. Read your PE reference file
-2. Run the test commands from the reference (report results as findings)
-3. Execute all three passes: Architecture → Quality → Security
-4. Return findings in YAML structure below
-
-DIFF:
-{paste git diff output}
-
-Return findings in this YAML structure:
-
-~~~yaml
-expert: {PE_TYPE}
-findings:
-  - id: "{SEVERITY}-001"
-    severity: CRITICAL|HIGH|MEDIUM|LOW|INFO
-    in_scope: true|false
-    title: "Brief issue title"
-    location: "src/full/path/from/repo/root.ts:123"
-    description: |
-      Full description of the issue.
-    recommendation: |
-      How to fix it with code example if helpful.
-~~~
-
-Only return the YAML block, no other text.
 ```
+Pass 1 — Architecture: SOLID, patterns, coupling, cohesion, separation of
+                       concerns, package/component boundaries, migration safety.
+
+Pass 2 — Quality + Tests: code quality + RUN THE TEST SUITE. Test failures
+                          are CRITICAL. Lint/vet/typecheck warnings are HIGH.
+
+Pass 3 — Security: top 1% strict. OWASP Top 10, auth, secrets, injection,
+                   supply chain. "Would this survive a pentest?", not "is this
+                   probably fine?". Assume an attacker is reading the diff.
+```
+
+### Right-sizing
+
+```
+if approach == "primary" (< 200 lines changed):
+  parent runs all three passes directly using its own judgment +
+  the Stack Map's test commands. No sub-agent dispatch.
+
+elif approach == "dispatch" (≥ 200 lines):
+  for each matching PE subagent (in parallel — single message, multiple Agent calls):
+    Agent(
+      subagent_type: "code-reviewer:pe-{stack}",   # pe-backend, pe-frontend, pe-devops
+      prompt: <dispatch input — see below>
+    )
+```
+
+### Dispatch Input
+
+Each PE subagent expects the following inputs in its prompt. The agent's system prompt carries the three-pass protocol, test commands, checklist, and YAML output contract — the dispatch only provides inputs:
+
+```
+You are reviewing changes for {ISSUE_ID}.
+
+DIFF (filtered to your domain):
+{paste git diff output for files matching this PE's patterns}
+
+SCOPE: {Branch Diff | Staged Diff | PR Review}
+TARGET BRANCH: {main | etc.}
+SOURCE BRANCH: {current branch}
+WORKTREE: {absolute path to repo root}
+{optional} PROJECT SUBDIR: {e.g., "crew/" for frontend in monorepo, "cdk/" for CDK subdir}
+
+Run your three-pass protocol. Return YAML findings.
+```
+
+The PE returns ONLY a YAML block — see "YAML Finding Structure" below.
 
 ---
 
@@ -231,66 +188,70 @@ Only return the YAML block, no other text.
 
 When consolidating sub-agent findings:
 
-1. **Merge duplicates** - Same issue from multiple experts = ONE finding
-2. **Tag domains** - Add `domains: [Security, Architecture]` to merged findings
-3. **Keep highest severity** - If experts disagree, use the higher severity
+```
+1. Merge duplicates:        same issue from multiple PEs = ONE finding
+2. Tag domains:             merged finding gets `domains: [Security, Architecture]`
+3. Keep highest severity:   if PEs disagree, use the higher severity
+```
 
 ---
 
 ## Phase 5: Finding Validation
 
-Before writing the final report, validate all findings:
+Before writing the final report:
 
-**If sub-agents were used:**
+```
+if sub-agents were used:
+  for each finding:
+    verify severity given full context
+    dismiss false positives with brief rationale
+    adjust severity if PE over/under-rated
 
-- Verify each finding's severity given full context
-- Dismiss false positives with brief rationale
-- Adjust severity if sub-agent over/under-rated
-- Question any CRITICAL/HIGH - is it truly blocking?
+elif primary reviewed directly:
+  for each CRITICAL/HIGH finding:
+    re-examine with full context
+    confirm actionable and accurate
+    downgrade if initial assessment was too harsh
+```
 
-**If primary reviewed directly:**
+**Validation checklist for any CRITICAL/HIGH:**
 
-- Re-examine any CRITICAL/HIGH findings identified
-- Confirm they're actionable and accurate
-- Downgrade if initial assessment was too harsh
-
-**Validation checklist for CRITICAL/HIGH:**
-
-- [ ] Is this actually exploitable / broken?
-- [ ] Does the full context change the severity?
-- [ ] Is this a real risk or theoretical?
+- [ ] Actually exploitable / broken?
+- [ ] Does full context change the severity?
+- [ ] Real risk, not theoretical?
 - [ ] Would a senior engineer agree this blocks the PR?
 
-**Never publish a CRITICAL/HIGH without a second look.**
+Never publish a CRITICAL/HIGH without a second look.
 
 ---
 
 ## Phase 6: Output
 
-### Step 1: Determine Review Name and Output Path
+### Step 1: Output Path
 
-```text
+```
 ./docs/code-reviews/{name}-code-review.md
 ```
 
-Determine `{name}` using this priority:
-
-1. **Issue ID in branch** (e.g. `feat/983-unified-api-gateway`) → `983`
-2. **Branch but no issue ID** (e.g. `fix/code-reviewer-cleanup`) → slugify branch: `fix-code-reviewer-cleanup`
-3. **On main / no branch** → ask the user for a short descriptive name
+`{name}` resolution from Phase 1.
 
 ### Step 2: Write or Append
 
-**File does not exist** → Write the full report using `assets/summary-report-template.md`.
-Populate the Reviewer (`git config user.name`), Review Round (1), and PR fields (number, URL, author — PR reviews only).
+```
+if file does NOT exist:
+  write full report using assets/summary-report-template.md
+  populate Reviewer (`git config user.name`), Review Round (1),
+  PR fields (number, URL, author — PR reviews only)
 
-**File already exists** (previous review) → Do NOT overwrite. Append a new Review Round:
+elif file exists (previous review):
+  read existing file
+  count `## Review Round` headings → next round number
+  (no round heading = implicit Round 1)
+  append new Review Round section before the `Generated with Claude Code` footer
+  update top-level Verdict to reflect latest round
+```
 
-1. Read existing file, count `## Review Round` headings to determine next round number
-   (no round heading = implicit Round 1)
-2. Append a new Review Round section before the `Generated with Claude Code` footer
-   (see multi-round template in `assets/summary-report-template.md` for exact format)
-3. Update the top-level **Verdict** to reflect the latest round's verdict
+See `assets/summary-report-template.md` for exact format.
 
 ### Step 3: Commit
 
@@ -299,41 +260,34 @@ git add ./docs/code-reviews/{name}-code-review.md
 git commit -m "docs: {name} code review"
 ```
 
-Commit to the **current branch** (source branch for PR reviews, feature branch for branch reviews).
-Never commit review files to main directly.
+Commit to the **current branch** (source branch for PR reviews, feature branch for branch reviews). Never commit review files to main.
 
-### Step 4: PR Comment Prompt (PR Reviews Only)
+### Step 4: PR Comment (PR Reviews Only)
 
-Prompt the reviewer:
+```
+Prompt: "Review complete and committed to {source_branch}.
+         Would you like to post a summary comment on PR #{number}?"
 
-> Review complete and committed to `{source_branch}`.
-> Would you like to post a summary comment on PR #{number}?
+if yes:
+  post condensed summary via `gh pr comment`:
+    - Verdict, finding counts by severity, link to review file
+    - Key findings (CRITICAL/HIGH only, one line each)
+    - Action items (Must Fix and Should Fix only)
 
-**If yes:**
-
-1. Post condensed summary via `gh pr comment`:
-   - Verdict, finding counts by severity, link to review file on branch
-   - Key findings (CRITICAL/HIGH only, one line each)
-   - Action items (Must Fix and Should Fix only)
-
-2. Approve or request changes based on verdict:
-
-| Verdict | Action |
-| - | - |
-| ✅ APPROVED | `gh pr review <PR_NUMBER> --approve` |
-| ⚠️ CHANGES REQUESTED | `gh pr review <PR_NUMBER> --request-changes` |
-| 🚫 BLOCKED | `gh pr review <PR_NUMBER> --request-changes` |
-
-**If no:** Done — review file is saved at the output path.
+  approve or request changes per Verdict:
+    APPROVED          → gh pr review <PR> --approve
+    CHANGES REQUESTED → gh pr review <PR> --request-changes
+    BLOCKED           → gh pr review <PR> --request-changes
+```
 
 ---
 
 ## Severity Definitions
 
 | Level | Criteria | Action |
-| - | - | - |
-| 🔴 CRITICAL | Security vulnerabilities, data loss, breaking changes | Must fix — blocks merge |
-| 🟠 HIGH | Bugs, significant design issues | Must fix — blocks merge |
+| --- | --- | --- |
+| 🔴 CRITICAL | Security vulnerabilities, data loss, breaking changes, test failures | Must fix — blocks merge |
+| 🟠 HIGH | Bugs, vet/typecheck warnings, significant design issues | Must fix — blocks merge |
 | 🟡 MEDIUM | Code quality, maintainability | Required — changes requested |
 | 🟢 LOW | Style, minor improvements | Optional |
 | ℹ️ INFO | Observations | Awareness |
@@ -342,24 +296,23 @@ Prompt the reviewer:
 
 ## Verdict Logic
 
-| Condition | Verdict |
-| - | - |
-| Any CRITICAL (in_scope: true) | 🚫 BLOCKED |
-| Any HIGH (in_scope: true) | 🚫 BLOCKED |
-| Any MEDIUM (in_scope: true) | ⚠️ CHANGES REQUESTED |
-| Only LOW or INFO | ✅ APPROVED |
+```
+if any CRITICAL with in_scope == true:    🚫 BLOCKED
+elif any HIGH with in_scope == true:      🚫 BLOCKED
+elif any MEDIUM with in_scope == true:    ⚠️  CHANGES REQUESTED
+else:                                      ✅ APPROVED
+```
 
-If it's worth reporting, it's worth fixing. LOW and INFO are awareness items —
-everything above that requires remediation before merge.
+If it's worth reporting, it's worth fixing. LOW and INFO are awareness items — everything above requires remediation before merge.
 
 ---
 
 ## YAML Finding Structure
 
-Sub-agents MUST return findings in this exact format:
+PE sub-agents return findings in this exact format. Primary agent parses YAML blocks and consolidates into the final report.
 
 ```yaml
-expert: Security|Architecture|Code Quality
+expert: PE-Backend|PE-Frontend|PE-DevOps|Primary
 findings:
   - id: "CRITICAL-001"
     severity: CRITICAL
@@ -379,7 +332,7 @@ findings:
   - id: "HIGH-001"
     severity: HIGH
     in_scope: true
-    title: "Memory leak - event listener not removed"
+    title: "Memory leak — event listener not removed"
     location: "src/components/email-viewer.ts:210"
     description: |
       Click event listener added to iframe but never removed
@@ -387,5 +340,3 @@ findings:
     recommendation: |
       Implement cleanup and remove the listener on unmount.
 ```
-
-Primary agent parses these YAML blocks and consolidates into final report.
