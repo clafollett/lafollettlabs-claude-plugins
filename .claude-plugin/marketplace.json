@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
-    "version": "1.4.0"
+    "version": "1.5.1"
   },
   "plugins": [
     {
@@ -34,6 +34,13 @@
       "name": "session-analyzer",
       "description": "Analyze and extract conversations from Claude Code session JSONL files — transcripts, token stats, tool usage, and session discovery",
       "source": "./plugins/session-analyzer",
+      "category": "developer-tools",
+      "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
+    },
+    {
+      "name": "ux-designer",
+      "description": "UX design harness — structured discovery, prototype generation, visual iteration via Playwright, Storybook support, parallel variations via worktrees",
+      "source": "./plugins/ux-designer",
       "category": "developer-tools",
       "homepage": "https://github.com/clafollett/lafollettlabs-claude-plugins"
     }

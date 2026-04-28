@@ -1,0 +1,801 @@
+Title: 99% of People Have No Idea What’s About to Happen With AI
+URL: https://www.youtube.com/watch?v=8yt5yzwJQko
+
+Transcript: 
+
+0:00
+99% of people have no idea what's about
+0:03
+to happen with AI. Most people think
+0:05
+they're ahead because they switched to
+0:06
+Claude or tried some new AI tool their
+0:08
+cousin told them about. That's like
+0:09
+upgrading from a flip phone to an iPhone
+0:12
+4 in 2026. What's coming with AI is
+0:15
+bigger than the internet, bigger than
+0:17
+smartphones, bigger than Bitcoin, and
+0:19
+the gap between people who see it and
+0:21
+the people who don't is growing every
+0:23
+single day. I build AI tools and AI
+0:25
+companies all the time. and what shifted
+0:27
+in the last few months has made me
+0:29
+rethink everything about AI. How I work,
+0:31
+how I build, and how I run my
+0:33
+businesses. So, I'm going to show you
+0:35
+where the three levels of AI exist right
+0:37
+now. Where 99% of people are getting
+0:39
+stuck and they don't even know it. Where
+0:41
+a small group of people are finally
+0:43
+getting ahead of everyone else and it's
+0:45
+growing [clears throat] in the absolute
+0:47
+cutting edge, the frontier where the
+0:49
+next wave of billionaires is being made
+0:52
+right now in real time, starting with
+0:54
+level one, the assistance. Most people
+0:57
+just figured out Chad GPT isn't the only
+0:59
+AI tool. They're switching from Claude.
+1:02
+They're trying Gemini. Maybe they heard
+1:03
+of Perplexity. That's a good first step,
+1:06
+but it's just that, a first step. At
+1:08
+this level, AI is a really smart
+1:10
+assistant sitting next to you. You can
+1:12
+create images, research, emails, design,
+1:15
+stuff that used to take hours or you had
+1:16
+to pay other people to do it. Done in
+1:18
+minutes. Awesome sauce. But you still
+1:20
+have to do the work. You might be
+1:22
+faster. You can do more, but you're
+1:24
+still the one doing it. One of the most
+1:26
+common questions I get around AI is,
+1:28
+"Hey, Dan, what tool should I be using?"
+1:30
+Here's what I recommend right now. These
+1:32
+are the tools that I use. Screenshot
+1:34
+this. Whisperflow helps me talk into it.
+1:37
+AI assisted, it's a gamecher. Claude
+1:39
+Co-work, automate things on my computer.
+1:41
+Manis, pretty much do endtoend complete
+1:44
+workflows. Claude Code, it's what I use
+1:46
+to build custom solutions. And OpenClaw,
+1:49
+it's the wrapper around it all. And I
+1:51
+have my own variant called Apex. We'll
+1:54
+get to that in a second. So now you just
+1:55
+realize you shouldn't just be using one
+1:57
+AI tool. You should be using many
+1:59
+depending on the job. Using those tools
+2:01
+I just showed you, that's great. They're
+2:03
+incredible. They will change your life.
+2:06
+But it's still just the beginning. It's
+2:08
+kind of like being in the kiddie pool.
+2:10
+And if you don't pay attention to what
+2:11
+I'm about to share next, you will fall
+2:13
+behind. I promise you this, there's no
+2:16
+future where AI doesn't exist and it
+2:19
+does way more for you than what you
+2:20
+think. That's level one. It's a start,
+2:23
+but it's just the beginning because
+2:24
+level two, you stop doing the work
+2:26
+entirely. Level two is the agent
+2:29
+operators. Chad GPT has almost 6 billion
+2:32
+visits a month. A tool like Manis, one
+2:35
+of the most popular agentic AI tools in
+2:37
+the world, gets 18 million. There's a
+2:40
+big discrepancy. That's only 0.3% of all
+2:43
+those people using Chad GBT on Manis.
+2:45
+Almost nobody is here yet. Do you
+2:48
+understand this? Level two, you give AI
+2:50
+a goal. It plans the steps. It executes
+2:53
+the step. It shares that with the people
+2:55
+you're about to share with it. It gets
+2:57
+feedback on what you shared and then
+2:59
+updates itself. It's tools like Manis,
+3:02
+Claude Code, Claude Co-work. Entire
+3:05
+projects are handled by the AI.
+3:07
+Essentially in that mode, you are the
+3:10
+agent operator. Okay, you configure it.
+3:12
+You're like the project manager of all
+3:13
+these virtual AI agents. You got to pick
+3:16
+the tool. You got to assign it the job.
+3:18
+You got to check [music] the outputs.
+3:19
+You got to figure out the data
+3:20
+connectors. And I even did a whole video
+3:22
+on Manis where you can use it to like
+3:24
+run and manage your business. I'll link
+3:25
+it at the end. So today, I want to break
+3:27
+down what actually changes between level
+3:29
+one and level two. First, let's compare
+3:31
+the touch points, like how many times
+3:33
+you have to touch the AI to get it to do
+3:35
+the thing. On level one, you have many
+3:37
+because you're still the person doing it
+3:39
+all. You just have different tools for
+3:40
+every task. On level two, you only have
+3:42
+a few because you have one specialty
+3:44
+tool or AI per job type. Now, let's
+3:47
+compare what the AI does. See, in level
+3:49
+one, it helps you do the work, right?
+3:51
+Write copy, do research, competitive
+3:53
+analysis. In level two, it does the
+3:56
+whole work for you. Not only the pieces,
+3:58
+but it puts the whole thing together as
+4:00
+a complete work product. Now, let's
+4:02
+compare what you do in these levels.
+4:04
+Level one is everything. If you don't do
+4:07
+anything, it won't do anything. Okay? It
+4:09
+might make you faster, but it's still
+4:10
+you. In level two, you can give it a
+4:12
+prompt, walk away, you manage the tool,
+4:14
+but when you come back, trust me, it'll
+4:16
+complete something for you. It'll build
+4:18
+you an app, it'll create a presentation,
+4:20
+it'll do the competitor analysis, it
+4:22
+does the whole thing. You essentially
+4:23
+just assign a task. You check what it
+4:25
+did, and then you can repeat it if you
+4:27
+need to make some changes. By the way,
+4:29
+if you're a business owner and you need
+4:30
+your team to get up [music] to speed
+4:32
+with AI, I've got a free AI cheat sheet
+4:34
+that covers everything. Which tools to
+4:37
+use, the core principles behind AI, how
+4:39
+to prompt it so that you actually get
+4:41
+great responses. So, instead of you
+4:43
+worrying about AI replacing your people,
+4:45
+how about get them using it to get 10
+4:47
+times more done. Just DM me the word
+4:49
+YouTube AI on Instagram and I'll send it
+4:51
+to you. Now, that's level two, and it's
+4:53
+crazy in its own right. Okay, you've
+4:55
+gone from doing the work to managing the
+4:57
+workers. And honestly, most people would
+4:59
+be set if they just stopped here. But
+5:01
+there's another level, and this next one
+5:03
+will take you from having an advantage
+5:05
+over most people to having one over
+5:07
+absolutely everyone.
+5:10
+Level three is the organization. Level
+5:13
+two was 0.3% of all AI users. Level
+5:17
+three is 0.05%.
+5:19
+Almost no one on the planet is here yet.
+5:22
+Imagine a whole team that works around
+5:24
+the clock. Not employees, not
+5:26
+freelancers, AI agents. And not just for
+5:29
+business. I'm talking buying stuff for
+5:31
+your house, researching trips, managing
+5:33
+your calendar, all of it. How? Well,
+5:36
+remember at the beginning I said don't
+5:38
+use just one AI tool for everything.
+5:40
+That was kind of a bit of a lie because
+5:42
+where the world is going, you actually
+5:44
+talk to one AI agent and it creates the
+5:48
+right sub agents for the job. In this
+5:50
+future, that's today. You never touch
+5:52
+another tool again. One AI, one guy. My
+5:56
+guy's name's Kai. Who named him? He did.
+5:59
+I know it sounds crazy. And Kai creates
+6:02
+sub agents that are specialists doing
+6:04
+things that I ask Kai to do, like check
+6:07
+out the code and do marketing and do
+6:10
+sales calls and everything. It's wild.
+6:13
+Think of like an org chart where you
+6:14
+have like the CEO and then their vice
+6:17
+presidents and their directors and all
+6:18
+that stuff. You can have an whole
+6:20
+organization, all AIS, all managed by
+6:23
+one main AI who's at the top. You talk
+6:26
+to them. You set the direction. You ask
+6:29
+them to execute approving what needs
+6:31
+your approval. That's it. I'm talking
+6:33
+about AI agents that have emails, that
+6:36
+have the ability to call people, have
+6:38
+the ability to review all information,
+6:40
+have perfect recall, perfect context
+6:42
+across your business. They check the
+6:44
+work amongst themselves to make sure
+6:46
+it's accurate. They check with the
+6:47
+finance person and say, "Hey, do we have
+6:49
+the budget for this?" It is wild. What's
+6:51
+happening today? At this level, your job
+6:54
+becomes deciding what to do. The AI
+6:56
+agent decides how to do it. Nobody's
+6:59
+talking about this. If you try to
+7:01
+explain this to somebody else, they will
+7:03
+think you're crazy. I'm speaking [music]
+7:05
+from experience talking to my brothers
+7:07
+and trying to explain to my wife and my
+7:09
+team members. Trust me, this isn't like
+7:12
+the future that might exist. I'm doing
+7:15
+this today. My friends are using this
+7:18
+system, level three, today. They're
+7:20
+going like this, like a rocket ship.
+7:24
+They're realizing they can do 10 times
+7:26
+more with 10 times less people. So,
+7:29
+let's go back to just touch points. How
+7:31
+many times you have to interact with the
+7:32
+AI to make it do things. In level one,
+7:34
+it's many because you're using a lot of
+7:36
+different tools for every task. Level
+7:38
+two is only a few because you start
+7:40
+using point specific solutions to get
+7:42
+the thing completed. Level three, it's
+7:44
+just one. There's one AI agent that you
+7:47
+build a relationship with and you talk
+7:48
+to them and then it does it all. Let's
+7:51
+talk about what the AI does in each
+7:52
+level. In level one, it helps you do the
+7:54
+work. That's cool. It can write emails.
+7:56
+It can do research. It could check on
+7:58
+things for you. Awesome sauce. Level two
+8:00
+is that it actually does the complete
+8:02
+work product for you. Outcome driven,
+8:04
+not just tasks. Level three, it manages
+8:08
+everything. It does level one, two, plus
+8:11
+three, and four, and five that you
+8:12
+didn't even know. Now, we got to talk
+8:14
+about what you do. What's your role in
+8:15
+all this? In level one, the truth is
+8:17
+you're doing everything. Okay? You're
+8:18
+faster. Cool. But it's still you. Level
+8:20
+two, now you manage the tool, the AI
+8:23
+that's doing things for you. You assign
+8:24
+it. You check it. You repeat. Level
+8:26
+three is you just set the direction. You
+8:29
+decide the what you want out of your
+8:31
+life. And then it goes and looks at all
+8:32
+your resources and your structure and
+8:34
+everything you got, and it says, "Here's
+8:36
+how we're going to do it." Now, I know
+8:37
+that sounds like a lot of talk, so let
+8:39
+me show you how I'm actually using this
+8:41
+today, right now. So, you might have
+8:43
+heard of a product called Open Cloud.
+8:45
+The problem with it is that it's very
+8:47
+complex. You predominantly need hardware
+8:49
+that most people can't even buy right
+8:50
+now to make it run, and there's massive
+8:52
+security issues. What I did was take
+8:54
+that platform and build my own. At
+8:56
+Martell Ventures, we build AI powered
+8:59
+companies. So, we decided to build Apex.
+9:01
+Apex stands for agent platform for
+9:04
+execution. That's why it's called Apex.
+9:06
+So, I built Apex for myself because I
+9:08
+needed something that was secure,
+9:09
+simple, and powerful. I wanted to give
+9:12
+it to my team, but I was like, open
+9:13
+call, I can't let that go on my internal
+9:15
+network. That's why I built it so that I
+9:17
+could manage my own agents, the skills,
+9:19
+the workflows, and honestly try to
+9:21
+figure out how does this whole thing
+9:22
+connect. Let me show you what it's doing
+9:25
+for me right now. So, first off, I've
+9:27
+got Reese. Ree isn't real. It's an AI
+9:30
+agent that Kai created to increase my
+9:33
+real estate portfolio. And what he does
+9:35
+every single day, 24/7, whether he's
+9:38
+happy, sad, or whatever day of the week,
+9:40
+he's scanning for real estate deals.
+9:42
+He's emailing offmarket deals. He's
+9:44
+messaging brokers. He's building
+9:46
+relationships. And I know you're like,
+9:48
+"How does a person not know?"
+9:49
+Trust me, Ree has perfect real estate
+9:53
+expertise. The first 2 hours I let him
+9:56
+go out onto the internet, he found seven
+9:59
+deals, analyzed them, said, "Here are
+10:01
+the two we should make a bid on. Here's
+10:03
+what I think we should go in at. Kai
+10:04
+says, "Hey, do you want to make an
+10:06
+approval on these two deals?" I say,
+10:07
+"Cool. Tell Reese, let's make some
+10:09
+offers." And this is all in the last
+10:11
+week. All I gave Kai was direction and
+10:13
+approval. Another use case is a unified
+10:16
+inbox. Think of it this way. You have
+10:17
+all these messaging tools, emails,
+10:20
+WhatsApp, Slack, your socials. They all
+10:23
+go into one place. [music] And what I
+10:24
+had Kai do is create a brain, what's
+10:27
+called an agent file for each one of
+10:29
+those inboxes off of the existing inbox
+10:32
+and how I've already messaged on each
+10:34
+one of those platforms. It knows how I
+10:36
+write when I email people. It knows how
+10:38
+I write when I'm on Slack. It knows how
+10:39
+I text on WhatsApp and then built a
+10:42
+messaging protocol to surface things
+10:44
+that need to see my attention or write
+10:46
+drafts or email all by itself. It can
+10:49
+look at context and my calendar. It can
+10:51
+understand resources. They can know
+10:53
+where projects are at and the whole
+10:55
+thing is managed by Kai with each
+10:57
+individual agent on each unified inbox.
+11:00
+And the crazy part is that nobody knows
+11:02
+when I'm on vacation anymore because all
+11:04
+the messages are getting responded to.
+11:06
+Think about the mental and emotional
+11:07
+load that no longer is there. How would
+11:10
+you feel if you never saw those red
+11:12
+notification jewels with 1,200 unread
+11:14
+messages and all these different
+11:15
+platforms? I also have a buying tool.
+11:18
+This is a tool I created called Procure.
+11:20
+You tell it to buy something and it
+11:22
+does. Like, hey, I want to buy the new
+11:24
+meta glasses. It researches it. It finds
+11:26
+it. It buys it. It ships it to me. It
+11:28
+uses a virtual credit card that's
+11:29
+limited and monitored. It gets all my
+11:31
+login information from my password
+11:33
+management tool. No more writing things
+11:35
+down to buy it later. No more browsing
+11:37
+on Amazon. No more grocery shopping and
+11:40
+running errands and picking stuff up.
+11:41
+Guess what? You don't have to do that
+11:43
+anymore. It's execution at the speed of
+11:45
+talk. Which brings me to my next tool,
+11:47
+which is called Speak. It's a phone call
+11:49
+tool. I built this to sit on top of Kai
+11:51
+because I was like, I just want to call
+11:53
+him. And guess what? He can only answer
+11:54
+my phone calls. He only takes direction
+11:56
+from me. So, for example, I can give Kai
+11:58
+a call. Hey, Kai, can you tell me what
+12:00
+messages I got to pay attention to
+12:02
+today?
+12:03
+You've got 50 messages in dispatch, 41
+12:05
+unread, top priority. Anne Henrix needs
+12:08
+your final headcount for the Rebel Stoke
+12:10
+retreat by Monday, plus two critical and
+12:12
+seven high priority messages.
+12:14
+Cool. Can you just text Ann and let her
+12:16
+know that we're going to be meeting at
+12:17
+11 anyways and I'll just review those
+12:19
+then?
+12:20
+Here's what I'm sending to Ann Henrix at
+12:21
+6.
+12:23
+No, don't say my number.
+12:25
+He just sends it. It's like having a
+12:27
+full-time genius chief of staff/buddy
+12:31
+person that can write code and do
+12:33
+research all on the other side of a
+12:35
+phone call. And here's the deal. I'm not
+12:37
+building Apex just for me and my team.
+12:39
+I'm building it for everyone. I
+12:41
+genuinely believe that the future of
+12:43
+buyback your time is being the agent
+12:46
+operator. That's what Apex is going to
+12:47
+be. The platform for managing these
+12:50
+agents for you and make it dead simple.
+12:52
+Now, it's not ready yet because there's
+12:54
+still a lot of testing, but if you want
+12:55
+to be the first to know, just click the
+12:57
+link below in the description and sign
+12:58
+up for the wait list. And that's the
+13:00
+future. It's not 5 years away. It's
+13:02
+[music] right now. The question is,
+13:05
+which side do you want to be on? This is
+13:07
+bigger than the internet. This is bigger
+13:09
+than Bitcoin. This is bigger than
+13:11
+mobile. This is bigger than any
+13:13
+technical shift in history. Don't be
+13:15
+that person selling newspapers in the
+13:18
+era of the internet. The one who saw it
+13:20
+all, who was at Bitcoin in 2009 and did
+13:23
+nothing. Cuz that time is today. It's
+13:26
+not hypothetical. It's not a maybe. It's
+13:28
+here and it's now. And it's not even
+13:30
+that hard if you're willing to learn.
+13:33
+And more importantly, unlearn. The
+13:36
+thought of I can't do that. I'm not
+13:38
+technical. that's not for me. Unlearn
+13:40
+that. So, I need you right now to leave
+13:42
+me a comment below. And if it's level
+13:43
+one, that's fine. You're still more
+13:44
+advanced than most of the people. Just
+13:46
+let me know what level you're at below.
+13:47
+And remember, if you want to turn your
+13:49
+whole team, including yourself, into AI
+13:52
+power users, just DM me the word YouTube
+13:54
+AI on Instagram and I'll send it to you.
+13:56
+And if you want me to walk you through
+13:57
+how to use tools like Manis step by
+14:00
+step, click here and I'll see you on the
+14:02
+other

@@ -1,0 +1,112 @@
+Title: Anthropic Finally Fixed The 1M Context Window Problem
+URL: https://www.youtube.com/watch?v=O1XLCh-uA_E
+
+Transcript: 
+
+0:00 The 1 million context window sounds like a huge upgrade, but in reality, it's way worse than most people realize. And this is exactly why the engineer working on Claude Code, Tariq, wrote the article.
+0:1010 seconds If you think Claude Code only starts getting worse at 1 million tokens, or that 1 million is so much you don't have to worry about it, you are actually wrong here. The degradation actually
+0:1818 seconds starts way earlier than halfway through the window. And the fix most people reach for, which is compaction, usually makes it worse. By the end of this
+0:2525 seconds video, you'll know exactly how to stop clawed code from getting dumber. the same way the team at Anthropic does it.
+0:3131 seconds Claude code feels degraded even though the models themselves are actually powerful. You might have noticed that it hallucinates more, has to be reminded
+0:3939 seconds again and again of instructions you gave earlier and forgets those instructions in the long run. We noticed this as well when we were running longer tasks and Claude's performance felt downgraded.
+0:4848 seconds But there is a whole reason behind it.
+0:5050 seconds Now models after OPUS 4.5 all ship with a 1 million context window instead of the previous 200,0001. While this
+0:5757 seconds upgrade sounds like most of the issues we used to have will be gone with a 1 million context window, it only sounds good in theory because now you are able
+1:041 minute, 4 seconds to fit more at once in the context window than before and ground it with more documents and information so that Claude doesn't stray from the task it
+1:121 minute, 12 seconds needs to do. A million context window also opens the door to longunning tasks without worrying too much about the context issues we used to face. But the
+1:201 minute, 20 seconds thing is all of this is not entirely solved. The million context window is actually a double-edged sword. While it does let Claude go longer and hold more
+1:281 minute, 28 seconds information at once, it all comes at a cost. It opens the door to context rot.
+1:321 minute, 32 seconds Context rot means the model's performance degrades with more information in its context window. Because with a bloated context window,
+1:391 minute, 39 seconds it has more things to pay attention to and cannot stay focused. And with a million context window, your context gets much more stuffed, which means
+1:461 minute, 46 seconds there is way more information available to interfere with Claude's reasoning than there was with the 200,000 context window. Context rot is not something
+1:541 minute, 54 seconds that occurs only at a highly bloated context either. According to the creator of Claude code, context rot actually starts happening around 300 to 400,000
+2:032 minutes, 3 seconds tokens, which is much less than a million, around just 40% usage. So no matter the context window size, we need to do things to prevent context rot. And
+2:112 minutes, 11 seconds knowing this will actually change how you work with the 1 million context window. Now a quick recap. The context window is everything the model sees at
+2:182 minutes, 18 seconds once, which includes the conversation so far, the claude.md file, the system prompt, files read into the session, and every tool call output. Each prompt adds
+2:272 minutes, 27 seconds more, and once the window fills up, you summarize to continue with a fresher window, which is compaction. If you don't manage context properly, there are four ways in which your agent can fail.
+2:372 minutes, 37 seconds This becomes even more evident and problematic in longunning agents. Context pollution is the first one,
+2:422 minutes, 42 seconds which we already discussed and is why it occurs. Goal drift is the second. This happens when your agent strays away from what it needs to do because it has too
+2:502 minutes, 50 seconds many things to focus on at the moment or in simpler terms, it has forgotten the goals it was supposed to work toward.
+2:552 minutes, 55 seconds This might have happened often if you are working with clawed code where you want your UI to look a certain way and have already specified it, but it doesn't follow that and you have to
+3:043 minutes, 4 seconds remind it of the actual goal. Memory corruption is the third and it occurs when during execution the agents internal state or stored facts become
+3:113 minutes, 11 seconds incorrect and it continues acting based on that faulty state. It is often hard to pinpoint the exact cause when agents run for long periods. It becomes unclear
+3:203 minutes, 20 seconds where the mistake originated. For example, memory corruption can look like a file being written one way by the agent itself and then modified by a sub
+3:273 minutes, 27 seconds agent that is not in the current context. The agent refers back to its own outdated memory and continues operating as if the file still exists in the same form it originally created.
+3:373 minutes, 37 seconds Decision inaccuracy is the last one. It occurs when an agent makes contradictory choices in nearly identical situations such as using one error handling pattern
+3:453 minutes, 45 seconds in one place and a different one elsewhere. All of these issues occur when context is not managed properly and they impact the long-term performance of
+3:533 minutes, 53 seconds agents. These are exactly the factors that most agent harnesses try to optimize for. So once you have asked Claude to do something and it has
+4:004 minutes finished, there are actually five possible options for what happens next in terms of your next instruction. Each one depends on what your next prompt is.
+4:084 minutes, 8 seconds If you use each one properly, the way you work with Claude can improve a lot.
+4:124 minutes, 12 seconds Though the most natural choice is to just continue, the other options actually help you manage your context more effectively. So you need to decide
+4:194 minutes, 19 seconds carefully whether you actually want to continue in the same flow or start a new session. Once the context gets bloated, you have two ways to shed the context.
+4:274 minutes, 27 seconds And the first choice is compaction which we already explained as a summarization of the existing content. But you need to be clear about when you actually want to
+4:344 minutes, 34 seconds summarize because the summary is lossy and a lot of details that might look important to you but not important to Claude can get dropped. As a result,
+4:414 minutes, 41 seconds important context may no longer exist in the context window. It is better to control compaction yourself instead of letting Claude hit autocompact because
+4:494 minutes, 49 seconds when it triggers mid task, the compaction becomes even messier. It tends to keep what it thinks is important and removes everything it does not think will be needed. So Claude is
+4:584 minutes, 58 seconds actually least reliable during compaction. At that point, Claude's focus is purely on summarization, and it is stripped of supporting context like
+5:055 minutes, 5 seconds the system prompt and other elements that normally make it more capable. It then relies heavily on its own assumptions about what is important,
+5:125 minutes, 12 seconds which can often lead to poor compaction decisions. Bad compaction usually happens when the model cannot clearly determine the direction of your work.
+5:195 minutes, 19 seconds For example, if you are in a long debugging session and there was a warning encountered earlier after autoco compaction, if you ask it to fix that specific warning, it won't know what
+5:285 minutes, 28 seconds warning are you talking about. This happens because the session was focused on debugging as a whole. So only a general summary of debugging activity
+5:355 minutes, 35 seconds was retained and the specific warning was treated as noise and dropped.
+5:395 minutes, 39 seconds Recency bias makes it worse. When compaction is triggered, the prompt prioritizes preserving recent details of what was being worked on. So older but
+5:475 minutes, 47 seconds still important information may be ignored or left out. If something was done incorrectly earlier, the model may no longer be aware of it after compaction. It only has access to the
+5:565 minutes, 56 seconds transcript level summary, not the full state of the project because tool call history is not fully preserved during compaction. You can set flags to control
+6:036 minutes, 3 seconds when autoco compaction happens, but this is something you should actively manage more often. Trigger compaction around the 300 to 400,000 range mentioned by
+6:126 minutes, 12 seconds the creator because that is typically where context rot begins to appear. And always provide a compaction instruction yourself because Claude responds more
+6:196 minutes, 19 seconds carefully when explicit instructions are included. Tell it which decisions,
+6:236 minutes, 23 seconds constraints, and discovered issues to carry forward so it knows what to prioritize. So you should hit compact when you actually want context from the
+6:316 minutes, 31 seconds previous task flow to carry into the new window, not when you want a fresh start.
+6:346 minutes, 34 seconds But before we move forwards, let's have a word by our sponsor, Verdant, an AI powered platform that helps builders turn ideas into shipped products. Your
+6:426 minutes, 42 seconds midbuild finally in the zone and your credits run out. Your AI stops dead,
+6:466 minutes, 46 seconds momentum gone. Every AI coding tool does this to you, but Verdant doesn't. When your credits hit zero, just switch to eco mode, a zerocost mode that keeps
+6:546 minutes, 54 seconds your AI running without spending another dollar. No interruption, no top up, no lost momentum. You just keep building.
+7:007 minutes And when you do have credits, you're not stuck picking between Claude, GPT, or Gemini. Verdant's multiplan mode runs all three together like a decision
+7:077 minutes, 7 seconds committee, giving you better plans without the model anxiety. Want even more flexibility? BY lets you plug your own API key directly into Verdant. Use
+7:157 minutes, 15 seconds your company's Claude or GPT credits. No platform charges. You just pay for what you actually use. You get 100 credits and 7 days to test it out. Click the
+7:237 minutes, 23 seconds link in the pinned comment and try Verdant for free. The second choice is to use the clear command which removes all context and starts a new session
+7:317 minutes, 31 seconds with an empty context. Unlike compaction, nothing is carried forward and only what you provide again remains in the context window. Just like
+7:387 minutes, 38 seconds compaction, you should not use clear only when you run out of context. If you are switching to an unrelated task, it is straightforward to clear the session
+7:457 minutes, 45 seconds and start fresh. So the previous task does not interfere with the new one. For example, if you ask the agent to write test cases for an application you are
+7:537 minutes, 53 seconds working on, you may not want it to retain details about how those test cases were generated. Instead of continuing debugging within the same context, you can start a fresh session.
+8:018 minutes, 1 second This way, Claude can work on debugging your application more effectively without being influenced by how it previously generated the test cases.
+8:098 minutes, 9 seconds Now, there is another approach you can use, which is combining both clear and compaction. This allows you to retain only what you want and discard everything else. The idea is to use a
+8:178 minutes, 17 seconds structured JSON format that captures the information you want to preserve. You can create a custom command so that you can reuse it frequently. In that
+8:248 minutes, 24 seconds command, you can include a JSON structure that contains the full task,
+8:288 minutes, 28 seconds current state, constraints, discovered issues, and any other relevant details you want Claude to retain, and then instruct it to save this to a file. This
+8:368 minutes, 36 seconds approach lets you get the best of both methods. Once you run the command, it will analyze the entire conversation and the current state of the application,
+8:438 minutes, 43 seconds something that a normal compaction does not reliably preserve, and save everything into the file as specified. A schema is much stricter than pros. So when Claude follows a defined structure,
+8:528 minutes, 52 seconds it can represent what is important more consistently and accurately. After the information has been saved to the file,
+8:588 minutes, 58 seconds you can safely use the clear command to remove everything from the context window. Then you can start a new session and instruct Claude to refer back to
+9:069 minutes, 6 seconds that document to gather context and implement the next task from there.
+9:149 minutes, 14 seconds As mentioned earlier, as context grows,
+9:169 minutes, 16 seconds the agents focus can drift because there is simply more information competing for attention. And this is even more noticeable with the million context
+9:239 minutes, 23 seconds window. This practice helps address both the goal drift problem and the decision inconsistency issues we discussed earlier. Instead of continuously pushing
+9:309 minutes, 30 seconds forward in a longunning task, it is useful to pause periodically and ask the agent to recap what it has done so far along with the constraints and other
+9:389 minutes, 38 seconds important factors. When you do this, it reinforces the original goals and brings key details back into the more recent part of the context window rather than leaving them buried in older sections.
+9:489 minutes, 48 seconds This helps ensure that important information stays fresh in the agents working context and is less likely to be lost during compaction or diluted over
+9:569 minutes, 56 seconds time. So, the agent remains more aligned with the task it is supposed to perform and maintains better consistency in its decisions. Also, if you are enjoying our
+10:0310 minutes, 3 seconds content, consider pressing the hype button because it helps us create more content like this and reach out to more people. Sub agents might not look like
+10:1110 minutes, 11 seconds much, but they are actually a very important way of managing context. Each sub agent is its own independent instance with a dedicated context
+10:1810 minutes, 18 seconds window, full tool access, and the permissions it needs to complete its task. They execute the assigned work in that separate context provided by the
+10:2610 minutes, 26 seconds parent agent and then return only the final output back to the main context.
+10:3010 minutes, 30 seconds So all the tool calls it made, files it read, web searches it performed, and intermediate reasoning stay within the sub agents own context and do not pollute the main agents context window.
+10:4010 minutes, 40 seconds This is an effective way to reduce context rot. Research tasks are the clearest example. The agent goes through multiple websites, pages, and sources,
+10:4810 minutes, 48 seconds and you do not want all of that raw information continuously added into the main context window. In such cases, a sub agent can handle the work
+10:5610 minutes, 56 seconds independently and return only the final synthesis. The key question you should ask yourself before using a sub agent is whether you will need access to the
+10:5610 minutes, 56 seconds intermediate steps again or whether you only care about the final output. Claude Code also manages sub agent orchestration on its own and can spawn agents to handle tasks automatically.
+11:0311 minutes, 3 seconds But sometimes you need to explicitly specify in your prompt that you want the work delegated to a sub agent so it is handled in isolation. So if you are
+11:1311 minutes, 13 seconds working on research tasks, refactoring tasks, summarization or document generation, you should consider separating them using sub agents instead of your main agent. Last but not least,
+11:2111 minutes, 21 seconds rewinding is really important compared to simply correcting because it removes irrelevant or incorrect parts from the context window while keeping only the
+11:3111 minutes, 31 seconds correct state. Whenever Claude runs into a mistake, people often try to reprompt it to take another approach. But a better option is to rewind instead and
+11:3911 minutes, 39 seconds correct state. Whenever Claude runs into a mistake, people often try to reprompt it to take another approach. But a better option is to rewind instead and
+11:4711 minutes, 47 seconds then provide the correct direction in the new prompt. You can use the rewind command or press the escape key twice to do this. After rewinding, you can also
+11:5411 minutes, 54 seconds summarize from that point. So the conversation up to that stage is preserved as useful context while removing the parts that led to the issue. Rewinding has multiple benefits.
+12:0312 minutes, 3 seconds First, it cleans the context window by removing the part where things went wrong, which results in a cleaner compaction summary that preserves only
+12:1112 minutes, 11 seconds correct implementations. Even if you pin important information, you avoid carrying forward sections where the agent deviated from the goal, which
+12:1812 minutes, 18 seconds helps reduce both decision inconsistency and goal drift. If you are using sub agents, rewinding ensures they receive a cleaner and more accurate context when
+12:2612 minutes, 26 seconds tasks are handed off. So incorrect approaches are not included in their working state. Similarly, if you use a handoff command, it captures the correct
+12:3412 minutes, 34 seconds state of the application instead of a corrupted or outdated one. So build the habit of rewinding instead of repeatedly correcting forward. so the agent
+12:4212 minutes, 42 seconds consistently works from a clean and accurate state through the whole session. That brings us to the end of this video. If you'd like to support the channel and help us keep making videos
+12:5012 minutes, 50 seconds like this, you can do so by using the super thanks button below. As always,
+12:5412 minutes, 54 seconds thank you for watching and I'll see you in the next one.

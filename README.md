@@ -10,6 +10,7 @@ Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.co
 | [context-handoff](./plugins/context-handoff/) | Session state handoff and resume with prior-session deduplication | [Commands](./plugins/context-handoff/commands/) |
 | [issue-manager](./plugins/issue-manager/) | GitHub Issue management with intent-over-implementation templates | [Skill](./plugins/issue-manager/skills/issue-manager/SKILL.md) |
 | [session-analyzer](./plugins/session-analyzer/) | Analyze and extract conversations from Claude Code session JSONL files | [Skill](./plugins/session-analyzer/skills/session-analyzer/SKILL.md) |
+| [ux-designer](./plugins/ux-designer/) | UX design harness with structured discovery, visual iteration, and parallel exploration | [Skill](./plugins/ux-designer/skills/ux-designer/SKILL.md) |
 
 **code-reviewer** — PE-powered code reviews
 
@@ -50,6 +51,20 @@ Analyze and extract conversations from Claude Code session JSONL files. Python 3
 - Streaming parser handles arbitrarily large session files
 - Markdown or JSON output formats
 
+### ux-designer
+
+Design harness for Claude Code — replicates and improves upon Claude Design's workflow. Structured discovery, interactive prototype generation, and visual iteration producing shippable code.
+
+- **`/ux-designer`** — Five-phase design workflow: Discovery → Brief & Milestones → Generation → Visual Iteration → Parallel Exploration
+- Multi-choice questioning flow fills gaps in the design prompt before generating anything
+- Supports all major frameworks: HTML, React, Next.js, Vue, Nuxt, Svelte, Astro, Solid
+- Optional Playwright MCP integration for screenshot-based self-critique and visual iteration
+- Storybook support — create new or work with existing Storybook setups for component-level design
+- Parallel design exploration via git worktrees and sub-agents
+- Design briefs persisted to `.design/brief.md` for cross-session continuity
+- Component library integration (ShadCN, Aceternity, HeroUI, Radix)
+- Every milestone committed to git — full version history of design iterations
+
 ## Installation
 
 ### Add the Marketplace
@@ -66,6 +81,7 @@ In Claude Code, open the plugin manager and add this marketplace:
 /plugins install context-handoff
 /plugins install issue-manager
 /plugins install session-analyzer
+/plugins install ux-designer
 ```
 
 ### Manual Installation
@@ -123,6 +139,13 @@ plugins/
       session-analyzer/
         SKILL.md
         scripts/                # session-analyzer.py CLI
+  ux-designer/                  # Plugin: UX design harness
+    .claude-plugin/plugin.json
+    skills/
+      ux-designer/
+        SKILL.md
+        references/             # Question library, layout patterns, animations, design system, frameworks
+        assets/                 # Design brief template
 ```
 
 ## Contributing
