@@ -232,7 +232,7 @@ Ask: "Does this plan look right, or should I adjust anything before I start buil
 
 ### Step 1: Framework Selection
 
-Always ask the user which framework to use. **Use AskUserQuestion**. Since the library has 8 frameworks but the tool allows max 4 options, pick the top 4 based on the design brief context (e.g., "convert visitors / landing page" → HTML + Next.js + Astro + React; "dashboard / app" → Next.js + React + Vue + Svelte). Use "Other" as the escape hatch for less common picks.
+Always ask the user which framework to use. **Use AskUserQuestion** with the question and options from `references/question-library.md` Q6.1. The default top 4 are Vue + Vite, Nuxt, Vanilla HTML + Tailwind, and Astro — adjust based on the design brief context (e.g., for a content-heavy blog, lead with Astro; for a dashboard, swap in a SPA option).
 
 ```
 AskUserQuestion({
@@ -241,16 +241,16 @@ AskUserQuestion({
     header: "Framework",
     multiSelect: false,
     options: [
-      { label: "Vanilla HTML + Tailwind (Recommended)", description: "Zero setup, instant preview, single index.html" },
-      { label: "Next.js + Tailwind", description: "Full-stack React, App Router, production-ready" },
-      { label: "Astro + Tailwind", description: "Content-first, minimal JS, fast static sites" },
-      { label: "React + Vite + Tailwind", description: "SPA, lightweight, modern React stack" }
+      { label: "Vue + Vite (Recommended)", description: "Composition API, fast Vite tooling, lightweight SPA" },
+      { label: "Nuxt", description: "Vue meta-framework with SSR, routing, file-based pages" },
+      { label: "Vanilla HTML + Tailwind", description: "Static HTML with Tailwind CDN, no build step" },
+      { label: "Astro", description: "Content-focused, ships minimal JS, plays nicely with Vue" }
     ]
   }]
 })
 ```
 
-Adjust the 4 framework options based on the brief — these aren't fixed. Other valid picks: Vue, Nuxt, Svelte/SvelteKit, Solid.
+Other valid picks the user can choose via "Other": Next.js, React + Vite, Svelte/SvelteKit, Solid.
 
 If a framework is already detected in the project, skip the question entirely: "I see you're using [framework]. I'll build with that unless you want something different — let me know."
 
@@ -478,7 +478,8 @@ You are a UX designer creating variation {LETTER} of a design. You are running i
 2. Use the framework specified in the brief
 3. Commit after each milestone with message: "design(variation-{letter}): {milestone description}"
 4. If Storybook is part of the brief, generate stories for each component you build
-5. When all milestones are complete, report:
+5. **Work autonomously — you cannot interact with the user.** AskUserQuestion is not available to sub-agents. If you hit a genuinely blocking ambiguity, stop and report it back instead of guessing or improvising. Otherwise, follow the brief and your variation direction; minor judgment calls are yours to make.
+6. When all milestones are complete, report:
    - Branch name (current branch)
    - 2-3 sentence summary of your approach
    - What makes this variation distinct

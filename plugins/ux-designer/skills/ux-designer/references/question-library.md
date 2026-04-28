@@ -1,6 +1,8 @@
 # Question Library
 
-AskUserQuestion-ready discovery questions. Each question has 2-4 distinct options; "Other" is added automatically by the tool.
+Rich, opinionated discovery questions. Each question has the full set of considered options as a knowledge base.
+
+When invoking `AskUserQuestion`, the tool accepts only 2-4 options per question. Pick the top 4 most relevant options for the current user's brief — drop the rest. Users can still type any dropped option via the auto-added "Other" choice. When falling back to plain markdown (AskUserQuestion unavailable), display the full option set.
 
 Select questions based on gap analysis. For each dimension the user's prompt does not adequately cover, pick 1-2 questions from the relevant category. Group up to 4 related questions into a single AskUserQuestion call. If the user's prompt already addresses a dimension thoroughly, skip the entire category. The goal is to fill gaps, not interrogate.
 
@@ -17,10 +19,11 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What is the single most important thing this project should do?
 
-**Options (2-4):**
+**Options:**
 - **Convert visitors** — Turn traffic into signups, leads, or trial activations
 - **Inform & educate** — Content-first experience, teach or explain something
 - **Showcase work** — Portfolio, product gallery, or brand presence
+- **Drive engagement** — Get users interacting and returning
 - **Sell directly** — Drive purchases of products or services
 
 ### Q1.2: Target Audience
@@ -30,10 +33,11 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > Who is the primary audience for this?
 
-**Options (2-4):**
+**Options:**
 - **Developers** — Technical users, engineers, API consumers
 - **Decision-makers** — Executives, founders, buyers evaluating solutions
 - **General consumers** — Broad public audience, non-technical users
+- **Students / learners** — Education-focused, course or tutorial audiences
 - **Enterprise teams** — Internal users at organizations, B2B operators
 
 ### Q1.3: Industry Context
@@ -43,10 +47,12 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What space does this live in?
 
-**Options (2-4):**
+**Options:**
 - **SaaS / dev tools** — Software products, developer infrastructure, APIs
 - **E-commerce / retail** — Physical or digital goods, storefronts
+- **Healthcare / wellness** — Medical, mental health, fitness, wellbeing
 - **Fintech** — Financial services, payments, banking, investing
+- **Education / edtech** — Schools, courses, learning platforms
 - **Agency / creative** — Studios, freelancers, creative service providers
 
 ### Q1.4: Inspiration References
@@ -56,7 +62,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > Do you have any reference sites or designs you admire?
 
-**Options (2-3):**
+**Options:**
 - **Yes, specific URLs** — I'll share links or screenshots of designs I like
 - **Vague vibe only** — I'll describe the feel, no specific references
 - **No references** — Surprise me based on the brief
@@ -68,11 +74,12 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > How will you know this project is working?
 
-**Options (2-4):**
+**Options:**
 - **Signups / leads** — Form submissions, account creations, demo requests
 - **Engagement** — Time on page, content consumed, depth of interaction
 - **Purchases** — Revenue, transactions, conversion to paid
 - **Retention** — Repeat visits, returning users, long-term stickiness
+- **Downloads / installs** — App installs, binary downloads, package adoption
 
 ---
 
@@ -85,11 +92,13 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What visual direction feels right for this project?
 
-**Options (2-4):**
+**Options:**
 - **Clean & minimal** — Lots of whitespace, subtle colors, understated elegance
 - **Bold & expressive** — Strong colors, large typography, dynamic layout
-- **Dark & immersive** — Dark backgrounds, glowing accents, cinematic atmosphere
 - **Warm & approachable** — Rounded shapes, soft gradients, friendly feel
+- **Dark & immersive** — Dark backgrounds, glowing accents, cinematic atmosphere
+- **Corporate & trustworthy** — Structured, professional, conservative palette
+- **Playful & creative** — Quirky shapes, bright palette, personality-driven
 
 ### Q2.2: Color Temperature
 
@@ -98,9 +107,10 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What color family should dominate?
 
-**Options (2-4):**
+**Options:**
 - **Cool blues / grays** — Calm, professional, tech-forward
 - **Warm oranges / reds** — Energetic, urgent, human
+- **Neutral earth tones** — Grounded, organic, timeless
 - **Monochrome** — Black, white, and shades of gray
 - **Vibrant multi-color** — Bold, diverse, attention-grabbing
 
@@ -111,10 +121,11 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What should the typography communicate?
 
-**Options (2-4):**
+**Options:**
 - **Modern sans-serif** — Inter, Geist, DM Sans territory
 - **Classic serif** — Editorial, authoritative, literary
 - **Technical mono** — Code-native, developer-oriented
+- **Rounded & friendly** — Nunito, Quicksand, approachable vibe
 - **Mixed pairing** — Serif headlines with sans body, or vice versa
 
 ### Q2.4: Imagery Style
@@ -124,11 +135,13 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What type of imagery fits the project?
 
-**Options (2-4):**
+**Options:**
 - **Photography** — Real photos, lifestyle shots, product imagery
 - **3D renders** — Dimensional, modern, product-centric
 - **Illustrations** — Hand-drawn or vector, storytelling-friendly
 - **Abstract / geometric** — Patterns, gradients, shapes, no figurative imagery
+- **Icons only** — No large imagery, icon-driven communication
+- **None** — Pure typography and layout, no decorative imagery
 
 ### Q2.5: Density & Spacing
 
@@ -137,7 +150,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > How much breathing room should the design have?
 
-**Options (2-4):**
+**Options:**
 - **Editorial** — Luxurious whitespace, one idea per viewport
 - **Spacious** — Generous spacing, deliberate pacing
 - **Balanced** — Comfortable spacing, multiple elements visible without crowding
@@ -150,7 +163,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What about light vs. dark mode?
 
-**Options (2-4):**
+**Options:**
 - **Light only** — Single light theme, no dark mode
 - **Dark only** — Single dark theme, no light mode
 - **Both with toggle** — User-controlled switch between modes
@@ -167,10 +180,11 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What kind of page structure are we building?
 
-**Options (2-4):**
+**Options:**
 - **Single-page scroll** — One long page with anchored sections
 - **Multi-page site** — Separate pages with shared navigation
 - **SPA with routing** — Single-page app with client-side route changes
+- **Wizard / onboarding** — Step-by-step progression through a flow
 - **Dashboard** — Data-heavy interface, panels and widgets
 
 ### Q3.2: Hero Section Style
@@ -180,11 +194,13 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What should the hero section look like?
 
-**Options (2-4):**
-- **Centered text + gradient** — Headline-forward over abstract background
+**Options:**
+- **Full-bleed image** — Edge-to-edge photography or artwork
+- **Video background** — Looping ambient video behind text
 - **Split layout** — Text on one side, image or graphic on the other
+- **Centered text + gradient** — Headline-forward over abstract background
+- **Animated / illustrated** — Motion graphics or custom illustration
 - **Product screenshot** — Show the actual product front and center
-- **Full-bleed media** — Edge-to-edge photography, video, or artwork
 
 ### Q3.3: Section Count
 
@@ -193,7 +209,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > How many sections should the page have (roughly)?
 
-**Options (2-4):**
+**Options:**
 - **3-4 focused** — Tight, high-impact, no filler
 - **5-7 standard** — Covers the bases without overloading
 - **8+ comprehensive** — Full story, lots of content blocks
@@ -206,11 +222,13 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > How should navigation work?
 
-**Options (2-4):**
+**Options:**
 - **Fixed top bar** — Always visible, scrolls with the page
 - **Transparent overlay** — Visible on hero, solidifies on scroll
 - **Sidebar nav** — Persistent left or right panel
 - **Hamburger only** — Hidden by default, expands on click
+- **Tabbed nav** — Horizontal tabs for section switching
+- **None** — No visible nav, scroll-only experience
 
 ### Q3.5: Footer Complexity
 
@@ -219,7 +237,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What should the footer include?
 
-**Options (2-4):**
+**Options:**
 - **Minimal centered** — Copyright and a few links, nothing more
 - **Multi-column links** — Organized sitemap-style link groups
 - **CTA banner + links** — Final call-to-action above the link columns
@@ -236,7 +254,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What tone should headlines and copy strike?
 
-**Options (2-4):**
+**Options:**
 - **Professional authority** — "Enterprise-grade solutions for modern teams"
 - **Conversational & friendly** — "Build something your users will actually love"
 - **Bold & direct** — "Stop guessing. Ship faster. Sleep better."
@@ -245,11 +263,11 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 ### Q4.2: Call-to-Action Style
 
 **Skip if:** user described CTA behavior or placement
-**Header:** CTA Style
+**Header:** CTA
 
 > How should calls-to-action be handled?
 
-**Options (2-4):**
+**Options:**
 - **Single prominent CTA** — One clear action, repeated at key moments
 - **Multiple CTAs per section** — Different actions for different segments
 - **Subtle inline links** — Woven into content naturally, no big buttons
@@ -262,24 +280,27 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What kind of social proof should we include?
 
-**Options (2-4):**
+**Options:**
 - **Customer testimonials** — Quotes with names and photos
 - **Logo bar** — "Trusted by" row of recognizable company logos
+- **Case studies** — Detailed success stories with outcomes
 - **Metrics & stats** — "10K+ users," "$1M+ saved" style proof points
+- **Reviews / ratings** — Star ratings, review excerpts, third-party scores
 - **None needed** — Skip social proof entirely
 
 ### Q4.4: Media Assets
 
 **Skip if:** user described their asset situation or provided files
-**Header:** Assets
+**Header:** Media
 
 > Where are the images and media coming from?
 
-**Options (2-4):**
-- **I'll provide assets** — My own images, photos, and media
+**Options:**
+- **User-provided** — My own images, photos, and media
 - **Stock photography** — Use stock with my approval on selections
 - **AI-generated** — Generate imagery as needed
-- **No photos** — Icons, illustrations, or text-only
+- **Icons / illustrations only** — No photos, vector-only assets
+- **Text-only** — No media assets needed
 
 ---
 
@@ -292,7 +313,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > How much animation should the design have?
 
-**Options (2-4):**
+**Options:**
 - **None** — Fully static, no motion
 - **Subtle entrances** — Elements fade or slide in on scroll
 - **Moderate scroll effects** — Sections animate as they enter the viewport
@@ -305,7 +326,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > How should scrolling feel?
 
-**Options (2-4):**
+**Options:**
 - **Standard scroll** — Native browser scroll, predictable, fast
 - **Smooth scroll** — Eased anchor scrolling, gentle momentum
 - **Parallax layers** — Background and foreground move at different speeds
@@ -318,7 +339,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What should happen on hover?
 
-**Options (2-4):**
+**Options:**
 - **Nothing** — No hover effects at all
 - **Subtle** — Slight opacity or scale changes
 - **Prominent** — Color shifts, shadow reveals, clear state changes
@@ -331,8 +352,9 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > Any special visual effects?
 
-**Options (2-4):**
+**Options:**
 - **None** — Keep it clean and performance-focused
+- **Video background** — Ambient looping video behind content
 - **Particle / grain** — Texture overlays, floating particles
 - **3D elements** — WebGL, three.js, or CSS 3D transforms
 - **Cursor effects** — Custom cursor, trail effects, magnetic buttons
@@ -348,11 +370,15 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What framework should this be built with?
 
-**Options (2-4):**
+**Options:**
+- **Vue + Vite** — Bare Vue SPA with Vite. Wire up routing and state yourself. Maximum control, minimal magic
+- **Nuxt** — Vue meta-framework with file-based routing. Supports SSR, SSG, SPA, and hybrid rendering modes
 - **Vanilla HTML + Tailwind** — Static HTML with Tailwind CDN, no build step
-- **Next.js** — React framework with SSR, routing, and full-stack features
-- **React + Vite** — Client-side React with fast Vite tooling
-- **Astro** — Content-focused, ships minimal JS, great for marketing sites
+- **Astro** — Content-focused, ships minimal JS by default, islands architecture, plays nicely with Vue components
+- **Next.js** — React meta-framework with file-based routing. Supports SSR, SSG, SPA, RSC, and hybrid rendering
+- **React + Vite** — React SPA with fast Vite tooling, no SSR
+- **Svelte / SvelteKit** — Compiler-based, minimal runtime, optional meta-framework
+- **Solid + Vite** — Fine-grained reactivity, JSX, fast Vite tooling
 
 ### Q6.2: Responsive Priority
 
@@ -361,7 +387,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > Which devices matter most?
 
-**Options (2-3):**
+**Options:**
 - **Mobile-first** — Design for phones, scale up to desktop
 - **Desktop-first** — Design for large screens, adapt down
 - **Equal priority** — Both mobile and desktop get first-class treatment
@@ -369,11 +395,11 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 ### Q6.3: Accessibility Target
 
 **Skip if:** user mentioned accessibility requirements or compliance level
-**Header:** A11y Target
+**Header:** A11y
 
 > What level of accessibility should we target?
 
-**Options (2-3):**
+**Options:**
 - **Basic** — Semantic HTML, alt text, reasonable contrast
 - **WCAG AA** — Proper contrast, full keyboard nav, screen reader support
 - **WCAG AAA** — Maximum compliance, exceeds standard requirements
@@ -389,7 +415,7 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > Do you have existing brand assets to work with?
 
-**Options (2-3):**
+**Options:**
 - **Yes, full brand** — Logos, brand colors, and fonts all defined
 - **Partial** — Some elements (logo or colors) but not everything
 - **Starting fresh** — No brand yet, build it all from scratch
@@ -401,11 +427,14 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > Any preference for a component library?
 
-**Options (2-4):**
-- **ShadCN / Radix** — Headless, composable, Tailwind-native
-- **HeroUI** — Clean, accessible, pre-styled components
-- **DaisyUI** — Tailwind plugin with themed components
+**Options:**
 - **None — custom** — Build custom components, full control
+- **ShadCN / Radix** — Headless, composable, Tailwind-native
+- **Aceternity UI** — Animated, modern, scroll-driven components
+- **HeroUI** — Clean, accessible, pre-styled components
+- **Headless UI** — Unstyled, accessible primitives
+- **Material UI** — Google's design system, opinionated
+- **DaisyUI** — Tailwind plugin with themed components
 
 ### Q7.3: Icon Style
 
@@ -414,8 +443,10 @@ Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the
 
 > What icon set should we use?
 
-**Options (2-4):**
+**Options:**
 - **Lucide** — Clean, consistent, widely supported
 - **Heroicons** — Tailwind team's set, two stroke styles
 - **Phosphor** — Flexible weights, large library
+- **Font Awesome** — Classic, massive selection
 - **Custom SVGs** — Bespoke icons designed for the project
+- **Emoji** — Native emoji as icons
