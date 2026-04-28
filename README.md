@@ -57,11 +57,12 @@ Design harness for Claude Code — replicates and improves upon Claude Design's 
 
 - **`/ux-designer`** — Five-phase design workflow: Discovery → Brief & Milestones → Generation → Visual Iteration → Parallel Exploration
 - Multi-choice questioning flow fills gaps in the design prompt before generating anything
+- **Variation count is asked up front** in Phase 2 (single direction vs 2-4 parallel variations) — no longer hidden behind keyword triggers
 - Supports all major frameworks: HTML, React, Next.js, Vue, Nuxt, Svelte, Astro, Solid
 - Optional Playwright MCP integration for screenshot-based self-critique and visual iteration
 - Storybook support — create new or work with existing Storybook setups for component-level design
-- Parallel design exploration via git worktrees and sub-agents
-- Design briefs persisted to `.design/brief.md` for cross-session continuity
+- Parallel design exploration via git worktrees, dispatched to a dedicated **`design-engineer`** subagent shipped with the plugin
+- Master brief persisted to `.design/brief.md`; per-variation briefs at `.design/briefs/variation-{letter}.md` (in the main repo, passed to sub-agents by absolute path so they're readable from inside fresh worktrees)
 - Component library integration (ShadCN, Aceternity, HeroUI, Radix)
 - Every milestone committed to git — full version history of design iterations
 
@@ -141,6 +142,8 @@ plugins/
         scripts/                # session-analyzer.py CLI
   ux-designer/                  # Plugin: UX design harness
     .claude-plugin/plugin.json
+    agents/
+      design-engineer.md        # Subagent — implements one variation in an isolated worktree
     skills/
       ux-designer/
         SKILL.md

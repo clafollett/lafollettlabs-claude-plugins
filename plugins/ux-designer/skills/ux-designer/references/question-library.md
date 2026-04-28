@@ -6,6 +6,8 @@ When invoking `AskUserQuestion`, the tool accepts only 2-4 options per question.
 
 Select questions based on gap analysis. For each dimension the user's prompt does not adequately cover, pick 1-2 questions from the relevant category. Group up to 4 related questions into a single AskUserQuestion call. If the user's prompt already addresses a dimension thoroughly, skip the entire category. The goal is to fill gaps, not interrogate.
 
+> **Flow-control prompts live in SKILL.md, not here.** This file covers discovery dimensions (visual style, audience, framework, etc.). The variation-count question — "Build one focused design, or explore N variations in parallel?" — is a flow-control branch and lives in **SKILL.md Phase 2 Step 1**. It is asked proactively on every run regardless of gap-analysis coverage and is not skippable. Don't add it here.
+
 Round budget:
 
 - Rounds 1-2: default, no permission needed
