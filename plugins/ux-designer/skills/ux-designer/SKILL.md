@@ -300,7 +300,16 @@ AskUserQuestion({
 })
 ```
 
-Record the result as `variation_count` (1, 2, 3, or 4). This drives the branch at the end of Phase 2.
+Map the selected label to an integer `variation_count` — persist the integer, not the label string. The branch at the end of Phase 2 (and all downstream logic) compares against the integer:
+
+| Selected label | `variation_count` |
+| --- | --- |
+| `Single direction (Recommended)` | `1` |
+| `2 variations` | `2` |
+| `3 variations` | `3` |
+| `4 variations` | `4` |
+
+If the user picks `Other` and types a number, parse it as an integer in the range 1-4 (clamp anything outside that range to the nearest valid value, or re-ask).
 
 ### Step 2: Generate Design Brief
 
@@ -543,6 +552,15 @@ After presenting the design:
 
 ## Phase 5 — Parallel Design Exploration
 
+### Letter Casing Convention
+
+Variations are identified by a single letter (`a`, `b`, `c`, `d`). **One canonical form, two presentations:**
+
+- **Lowercase** (`a|b|c|d`) is the canonical identifier. Use it for **everything machine-readable**: filesystem paths (`.design/briefs/variation-a.md`, `.design/screenshots/variation-a/`), git branch names (`design/variation-a`), agent names (`design-variation-a`), commit-message scopes (`design(variation-a):`), and any value passed into a sub-agent prompt as `{letter}`.
+- **Uppercase** (`A|B|C|D`) is for **user-facing display only**: when telling the user "Variation A: Dark mode with neon accents…" or showing a comparison table. Convert from lowercase at presentation time (`letter.upper()`) — do NOT store uppercase as the source of truth.
+
+When iterating in pseudocode below, the loop variable is always lowercase. Display strings are derived, not stored.
+
 ### When to Trigger
 
 - **Default path when the user picked 2-4 variations during Phase 2 Step 1.** Phase 5 runs because it was chosen up front; jump straight to Step 2 (variation count is already known, Step 1 is skipped).
@@ -572,13 +590,15 @@ AskUserQuestion({
 
 ### Step 2: Define Variation Directives & Write Per-Variation Briefs
 
-**2a. Define directives.** For each variation, define a specific visual direction. Example for 3 variations:
+**2a. Define directives.** For each variation, define a specific visual direction. The canonical key is lowercase (`a`, `b`, `c`, `d`); display labels uppercase the letter for the user. Example for 3 variations:
 
-- **Variation A**: "Dark mode with neon accents, immersive animations"
-- **Variation B**: "Light and airy, minimal with lots of whitespace"
-- **Variation C**: "Bold and colorful, playful with rounded shapes"
+| Key (canonical) | Display label | Directive |
+| --- | --- | --- |
+| `a` | Variation A | "Dark mode with neon accents, immersive animations" |
+| `b` | Variation B | "Light and airy, minimal with lots of whitespace" |
+| `c` | Variation C | "Bold and colorful, playful with rounded shapes" |
 
-Present the directives to the user for approval.
+Present the directives to the user for approval using the display labels. Persist and dispatch using the lowercase keys.
 
 **2b. Write per-variation brief files in the MAIN REPO** at `.design/briefs/variation-{letter}.md`. These files are the contract each sub-agent reads (via absolute path — see Step 3). They live in the main repo, NOT in the worktrees, because the harness creates worktrees from the current branch HEAD and uncommitted files don't appear there.
 
@@ -621,22 +641,32 @@ else:
   use_teams = false
 ```
 
-**Resolve the absolute brief path before dispatch.** The sub-agent's worktree is a fresh checkout that does NOT contain uncommitted files. Pass the brief's absolute path in the main repo so the sub-agent can read it from outside its worktree:
+**Resolve the absolute brief path before dispatch.** The sub-agent's worktree is a fresh checkout that does NOT contain uncommitted files. Pass the brief's absolute path in the main repo so the sub-agent can read it from outside its worktree.
+
+`.design/` is a sibling of the project's `package.json` (per Canonical Paths). For a single-project repo that's the git toplevel; for a monorepo where the design target lives in a subdir (e.g., `web/`), `.design/` lives in that subdir, NOT at the git root. Resolve accordingly:
 
 ```
-main_repo_path = `git rev-parse --show-toplevel`  # e.g., /Users/foo/myproject
-brief_abs_path = "{main_repo_path}/.design/briefs/variation-{letter}.md"
+git_toplevel       = `git rev-parse --show-toplevel`           # e.g., /Users/foo/myproject
+project_subdir     = "" if .design/ is at git_toplevel
+                     else "<subdir>" (e.g., "web") if monorepo with target in a subdir
+project_root_abs   = git_toplevel + ("/" + project_subdir if project_subdir else "")
+brief_abs_path     = "{project_root_abs}/.design/briefs/variation-{letter}.md"
+
+# Sanity-check before dispatch — fail loudly if the file isn't where expected:
+test -f "{brief_abs_path}" || abort("brief missing — wrote to wrong project_root?")
 ```
+
+Pass `project_subdir` to the sub-agent too, so its dev-server commands and screenshot paths target the same location.
 
 **Spawn — single message, multiple Agent calls (parallel execution):**
 
 ```
-for each variation in [A, B, C, ...]:
+for letter in ["a", "b", "c", "d"][:variation_count]:    # lowercase canonical key
   Agent(
     subagent_type: "ux-designer:design-engineer",
-    name: "design-variation-{letter}",          # for SendMessage targeting
-    team_name: "design-exploration",            # ONLY if use_teams
-    isolation: "worktree",                      # harness creates the worktree, returns branch + path
+    name: "design-variation-{letter}",                   # e.g., "design-variation-a"
+    team_name: "design-exploration",                     # ONLY if use_teams
+    isolation: "worktree",                               # harness creates the worktree, returns branch + path
     run_in_background: true,
     prompt: <short dispatch prompt — see below>
   )
