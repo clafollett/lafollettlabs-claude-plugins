@@ -108,11 +108,19 @@ AskUserQuestion({
 })
 ```
 
-If the response includes "Other" with text mentioning Storybook, treat it as the existing-Storybook signal.
+**On response:**
 
-If the user provides epics or stories, extract the **what** and **why** to inform layout structure, content hierarchy, and feature sections. The design should reflect what engineering is building.
+```
+if response.Other mentions Storybook:
+  storybook_signal = true
 
-If the user provides a Storybook URL or has an existing `.storybook/` directory, note it — this changes the generation strategy to component-first (see Phase 3).
+if response includes epics/stories:
+  extract `what` + `why` → drives layout, content hierarchy, feature sections
+  design must reflect what engineering is building
+
+if user provided Storybook URL OR `.storybook/` exists:
+  generation_strategy = "component_first"   # see Phase 3 Step 2
+```
 
 ### Step 2: Project Detection
 
@@ -152,13 +160,35 @@ Analyze the user's prompt for completeness across these dimensions:
 | Technical Stack | Framework, component libraries, responsive |
 | Design System | Existing brand, typography, component patterns |
 
-**If the prompt covers 5+ dimensions**: skip questioning and proceed to Phase 2.
-
-**Otherwise**: load `references/question-library.md` and select 1-2 questions per uncovered dimension.
+```
+if dimensions_covered_in_prompt >= 5:
+  skip questioning → proceed to Phase 2
+else:
+  load references/question-library.md
+  select 1-2 questions per uncovered dimension
+```
 
 ### Step 4: Questioning Flow
 
-Pick questions from `references/question-library.md` based on which dimensions the gap analysis flagged. Group up to 4 related questions per `AskUserQuestion` call. Maximum 2 rounds total to avoid over-interrogating.
+Pick questions from `references/question-library.md` based on dimensions the gap analysis flagged. Group up to 4 questions per `AskUserQuestion` call.
+
+**Round loop:**
+
+```
+N = 1
+while true:
+  ask round N  (≤4 questions via AskUserQuestion)
+  re-run gap analysis
+  if no consequential gaps remain: break
+  if N < 2: N += 1; continue          # rounds 1-2 are default, no permission needed
+  ask user via AskUserQuestion:
+    "Continue with N more questions on [dimensions], or use sensible defaults?"
+  if user picks defaults: break
+  N += 1
+proceed to Phase 2
+```
+
+Goal: fill gaps, not interrogate. Stop the moment the user prefers defaults.
 
 **Use AskUserQuestion** — every question in the library is already AskUserQuestion-ready: 2-4 distinct options each, with `Header` and `Skip if` metadata. Map them directly to AskUserQuestion fields:
 - The `Header:` line → `header` field (max 12 chars)
@@ -193,7 +223,7 @@ Before I start designing, a few questions to nail the direction:
    e) Or tell me something different
 ```
 
-After the user answers, proceed to Phase 2. Do not chase a third round of questions — fill remaining gaps with sensible defaults in the design brief and let the user redirect during iteration.
+When the round loop exits, fill any remaining gaps with sensible defaults in the design brief. The user can always redirect during iteration.
 
 ---
 
@@ -232,7 +262,19 @@ Ask: "Does this plan look right, or should I adjust anything before I start buil
 
 ### Step 1: Framework Selection
 
-Always ask the user which framework to use. **Use AskUserQuestion** with the question and options from `references/question-library.md` Q6.1. The default top 4 are Vue + Vite, Nuxt, Vanilla HTML + Tailwind, and Astro — adjust based on the design brief context (e.g., for a content-heavy blog, lead with Astro; for a dashboard, swap in a SPA option).
+```
+if framework detected in project:
+  inform user: "I see [framework]. I'll build with that unless you want something different."
+else:
+  ask via AskUserQuestion (Q6.1 in question-library.md)
+  default top 4: Vue + Vite, Nuxt, Vanilla HTML + Tailwind, Astro
+  adjust top 4 based on brief (content-heavy → lead Astro; dashboard → SPA option)
+  "Other" picks: Next.js, React + Vite, Svelte/SvelteKit, Solid
+
+load references/framework-starters.md
+```
+
+Example invocation:
 
 ```
 AskUserQuestion({
@@ -250,40 +292,42 @@ AskUserQuestion({
 })
 ```
 
-Other valid picks the user can choose via "Other": Next.js, React + Vite, Svelte/SvelteKit, Solid.
-
-If a framework is already detected in the project, skip the question entirely: "I see you're using [framework]. I'll build with that unless you want something different — let me know."
-
-Load `references/framework-starters.md` for initialization commands and boilerplate.
-
 ### Step 2: Storybook Strategy
 
-Determine the Storybook approach based on project context:
+```
+if existing_storybook detected (.storybook/ OR *.stories.* found):
+  storybook_active = true
+  generation_strategy = "component_first"
+  read .storybook/ config
+  read 1-2 existing stories (match CSF3 vs CSF2, naming, args style)
+  generate new stories matching detected conventions
+  every new component → co-located .stories.* file
 
-**Existing Storybook detected** (`.storybook/` directory or `*.stories.*` files found):
-- Read the existing Storybook config to understand the setup
-- Read 1-2 existing stories to match the pattern (CSF3 vs CSF2, naming, args style)
-- Generate new stories that match the existing conventions
-- New components get stories alongside them
+elif user_requested_storybook:
+  run: npx storybook@latest init
+  storybook_active = true
+  generation_strategy = "component_first"
+  create design-system story (color tokens, typography, spacing)
+  every new component → .stories.{tsx|js|svelte|vue}
 
-**User requests Storybook but none exists**:
-- Initialize Storybook for the detected framework:
-  ```bash
-  npx storybook@latest init
-  ```
-- Create a design system story that documents color tokens, typography, and spacing
-- Each new component gets a `.stories.tsx` (or `.stories.js`, `.stories.svelte`, etc.) file
+else:
+  storybook_active = false
+  generation_strategy = "page_first"
+  build pages directly
+  if user later requests storybook → add incrementally
+```
 
-**No Storybook requested or needed**:
-- Skip Storybook entirely. Build pages directly.
-- If the user later asks for Storybook, add it incrementally.
+**Component-first workflow** (when `generation_strategy == "component_first"`):
 
-**Component-first workflow** (when Storybook is active):
-1. Design individual components first — button, card, hero, nav, etc.
-2. Create a Storybook story for each component with variants (primary, secondary, sizes)
-3. Visually verify each component in Storybook before composing pages
-4. Compose components into full pages
-5. This produces higher-quality, more reusable output than page-first design
+```
+for each component (button, card, hero, nav, ...):
+  design component
+  create story with variants (primary, secondary, sizes)
+  visually verify in storybook
+compose verified components → full pages
+```
+
+Produces higher-quality, more reusable output than page-first design.
 
 ### Step 3: Generation Strategy
 
@@ -325,56 +369,52 @@ A "visual checkpoint" means: render the current state in a browser (via Playwrig
 
 ### Step 1: Detect Visual Tools
 
-Check which visual feedback tools are available before the first checkpoint:
+```
+playwright_available = any tool name starts with "mcp__playwright__browser_"
+storybook_available = (package.json has "storybook" script) AND (.storybook/ exists)
 
-1. **Playwright MCP**: Check if any `mcp__playwright__browser_*` tools are in your available toolset
-2. **Storybook**: Check `package.json` for a `storybook` script and an existing `.storybook/` directory
-3. **Neither**: Fall back to manual browser workflow
+if playwright_available AND storybook_available: visual_mode = "playwright + storybook"
+elif playwright_available: visual_mode = "playwright"
+elif storybook_available: visual_mode = "storybook"
+else: visual_mode = "manual"
+```
 
-Set the visual mode for the rest of the session:
-- `playwright` — full screenshot-based iteration with self-critique
-- `storybook` — component-level iteration via Storybook (manual user check)
-- `playwright + storybook` — both available, use Storybook for component stories and Playwright for full pages
-- `manual` — user opens browser, provides text feedback
+Mode behaviors:
+- **playwright** — screenshot-based iteration with self-critique
+- **storybook** — component-level iteration (manual user check)
+- **playwright + storybook** — Storybook for components, Playwright for full pages
+- **manual** — user opens browser, provides text feedback
 
 ### Step 2: Visual Iteration with Playwright MCP
 
-The official `@playwright/mcp` package exposes browser tools as `mcp__playwright__browser_*`. Note that **screenshots use the current viewport size** — to capture mobile vs desktop, call `browser_resize` first.
+`@playwright/mcp` exposes browser tools as `mcp__playwright__browser_*`. Screenshots use the **current viewport** — call `browser_resize` first to capture mobile vs desktop.
 
-If Playwright MCP is available:
+```
+ensure dev server running (start in background if not: `npm run dev &`)
 
-1. Ensure the dev server is running (start it in the background if not):
-   ```bash
-   npm run dev &
-   # Wait briefly for the server to be ready before navigating
-   ```
+for viewport in [(1440, 900) "desktop", (375, 812) "mobile"]:
+  browser_resize(viewport)
+  browser_navigate(dev_server_url)
+  optionally browser_wait_for(content_ready)
 
-2. Navigate to the page (and resize for desktop):
-   - `mcp__playwright__browser_resize` with `width: 1440, height: 900`
-   - `mcp__playwright__browser_navigate` with the dev server URL
-   - Optionally `mcp__playwright__browser_wait_for` for content readiness
+  capture:
+    browser_take_screenshot()          # for pixel evaluation
+    OR browser_snapshot()              # accessibility tree, token-cheap
 
-3. Capture the page:
-   - `mcp__playwright__browser_take_screenshot` to save a desktop screenshot
-   - Or use `mcp__playwright__browser_snapshot` to get the accessibility tree (more token-efficient if you don't need pixels)
+  evaluate against design brief:
+    - layout alignment, spacing
+    - color harmony, contrast
+    - typography hierarchy
+    - visual balance, whitespace
+    - mobile responsiveness (on mobile pass)
 
-4. Evaluate against the design brief:
-   - Layout alignment and spacing
-   - Color harmony and contrast
-   - Typography hierarchy
-   - Visual balance and whitespace
-   - Mobile responsiveness (after the mobile resize below)
+  self_correct (max 2 passes per milestone):
+    list 1-3 specific issues
+    apply fixes
+    re-screenshot to verify
 
-5. Self-correct (maximum 2 passes per milestone):
-   - List 1-3 specific issues found
-   - Apply fixes
-   - Re-screenshot to verify
-
-6. Capture mobile viewport:
-   - `mcp__playwright__browser_resize` with `width: 375, height: 812`
-   - `mcp__playwright__browser_take_screenshot` for the mobile screenshot
-
-7. Present to user: "Here's what I built — desktop and mobile views. Any feedback?"
+present to user: "Here's desktop and mobile. Any feedback?"
+```
 
 ### Step 3: Visual Iteration with Storybook
 
@@ -488,26 +528,32 @@ You are a UX designer creating variation {LETTER} of a design. You are running i
 
 ### Step 4: Convergence
 
-After all sub-agents complete, the harness returns each worktree's path and branch name in the agent results.
+```
+on all sub-agents complete:
+  results = harness returns {worktree_path, branch_name} per agent
 
-1. If Playwright is available, navigate each variation's dev server (or check out each branch in turn) to capture screenshots for side-by-side comparison
-2. Present a summary of each variation with its directive and approach
-3. Ask the user to pick a winner
-4. Merge the chosen branch into main:
-   ```bash
-   git checkout main
-   git merge design/variation-{letter}
-   ```
-5. Delete the unused branches (worktrees were already cleaned up by the harness when sub-agents finished, unless the agents made changes — in which case `git worktree list` will show them):
-   ```bash
-   git branch -D design/variation-{loser-1} design/variation-{loser-2}
-   # If any worktrees remain, remove them explicitly:
-   git worktree list
-   git worktree remove {path}
-   ```
-6. Continue iterating on the merged result
+  if playwright_available:
+    for each variation:
+      navigate variation's dev server (or git checkout branch)
+      browser_take_screenshot()
+    present side-by-side comparison
+  else:
+    present text summary per variation (directive + approach)
 
-**Note:** If you need explicit control over worktree paths (e.g., to host multiple dev servers simultaneously for live comparison), create them manually with `git worktree add` and dispatch sub-agents **without** `isolation: "worktree"` — but then you must also clean up worktrees yourself. The default isolated approach is simpler.
+  winner = ask user via AskUserQuestion ("Which variation should we ship?")
+
+  git checkout main
+  git merge design/variation-{winner}
+  git branch -D design/variation-{losers...}
+
+  # Worktrees auto-clean on agent completion if no changes were made.
+  git worktree list                      # verify
+  git worktree remove {path}             # explicit cleanup if any remain
+
+  continue iterating on merged result
+```
+
+**Note:** For explicit worktree-path control (e.g., multiple dev servers running simultaneously for live comparison), create worktrees manually with `git worktree add` and dispatch sub-agents WITHOUT `isolation: "worktree"`. You then own cleanup.
 
 ---
 

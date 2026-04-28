@@ -6,7 +6,14 @@ When invoking `AskUserQuestion`, the tool accepts only 2-4 options per question.
 
 Select questions based on gap analysis. For each dimension the user's prompt does not adequately cover, pick 1-2 questions from the relevant category. Group up to 4 related questions into a single AskUserQuestion call. If the user's prompt already addresses a dimension thoroughly, skip the entire category. The goal is to fill gaps, not interrogate.
 
-Maximum 2 rounds of questions. Fill remaining gaps with sensible defaults in the design brief and let the user redirect during iteration.
+Round budget:
+
+- Rounds 1-2: default, no permission needed
+- Round 3+: ask user via `AskUserQuestion` first ("continue, or use defaults?")
+- Exit immediately when no consequential gaps remain OR user picks defaults
+- Fill remaining gaps in the brief; user can redirect during iteration
+
+See SKILL.md Phase 1 Step 4 for the full round loop.
 
 ---
 
