@@ -86,6 +86,38 @@ If `ToolSearch` does not return `AskUserQuestion` (e.g., the tool is unavailable
 
 ---
 
+## Canonical Paths
+
+All design artifacts live under `.design/` (sibling of the project's `package.json` — for a monorepo with the design target in a subdir, this is `<subdir>/.design/`, not the monorepo root):
+
+```
+.design/
+├── brief.md                              # Phase 2 — design brief, contract for sub-agents
+├── shipped-direction.md                  # Post-merge — captures brief + winning directive (optional)
+└── screenshots/
+    ├── {milestone}-{viewport}.png        # Phase 4 single-agent iteration
+    │   # examples: m1-hero-desktop.png, m1-hero-mobile.png, m4-pricing-desktop.png
+    └── variation-{letter}/               # Phase 5 parallel exploration (one subdir per variation)
+        └── {page}-{viewport}.png
+        #   examples: variation-a/home-desktop.png, variation-b/contact-mobile.png
+```
+
+**Filename conventions:**
+- `{viewport}` is `desktop` (1440×900) or `mobile` (375×812) — extend if you add tablet captures
+- `{milestone}` is the milestone shorthand (e.g., `m1-hero`, `m4-pricing`)
+- `{page}` is the route minus the slash (`home` for `/`, `about`, `how-it-works`, etc.)
+- Always lowercase, dash-separated. No spaces, no caps.
+
+**Why one canonical location:**
+- Parent agent reading screenshots during Phase 5 convergence does NOT need to discover where each sub-agent put its files
+- Sub-agents do NOT have to invent a path — drop them at the documented location
+- `git diff`, code review, and `find` all work predictably
+- `.design/` aligns with `brief.md`'s home — design artifacts cluster
+
+Sub-agents in Phase 5 should write screenshots to `.design/screenshots/variation-{letter}/` in their worktree. The parent reads from each worktree's `.design/screenshots/` path during convergence.
+
+---
+
 ## Phase 1 — Discovery
 
 ### Step 1: Reference Material Intake
@@ -139,12 +171,23 @@ find . \( -name "*.stories.tsx" -o -name "*.stories.jsx" -o -name "*.stories.ts"
 
 # Design tokens — check both src/ and app/ (Next.js App Router) and root
 find src app . -maxdepth 3 \( -name "globals.css" -o -name "theme.css" -o -name "tokens.css" -o -name "*.module.css" \) -not -path "*/node_modules/*" 2>/dev/null | head -10
+
+# Feature flags / env-gated UI states — pages that render differently based on env vars
+grep -rE "import\.meta\.env\.PUBLIC_|process\.env\.NEXT_PUBLIC_|process\.env\.VITE_" src app 2>/dev/null | grep -iE "enabled|disabled|flag|gate" | head -10
+grep -rE "(PUBLIC_|VITE_|NEXT_PUBLIC_)[A-Z_]+_(ENABLED|DISABLED|FLAG)" package.json 2>/dev/null | head -5
 ```
 
-If an existing design system or Storybook is detected:
-- Load `references/design-system-template.md` and extract existing tokens
-- Note detected framework and component library
-- Inform the user: "I detected [framework/library/Storybook]. I'll work within your existing design system."
+```
+if existing_design_system OR storybook detected:
+  load references/design-system-template.md
+  extract tokens
+  inform user: "I detected [framework/library/Storybook]. I'll work within your existing design system."
+
+if env-gated UI states detected:
+  list flags found (e.g., PUBLIC_CONTACT_ENABLED, VITE_FEATURE_X)
+  ask user which dev-time defaults to use OR document them in the brief
+  pass env vars to sub-agents in Phase 5 prompts so dev preview renders correctly
+```
 
 ### Step 3: Gap Analysis
 
@@ -398,8 +441,8 @@ for viewport in [(1440, 900) "desktop", (375, 812) "mobile"]:
   optionally browser_wait_for(content_ready)
 
   capture:
-    browser_take_screenshot()          # for pixel evaluation
-    OR browser_snapshot()              # accessibility tree, token-cheap
+    browser_take_screenshot(path: ".design/screenshots/{milestone}-{viewport}.png")
+    OR browser_snapshot()              # accessibility tree, token-cheap (no file)
 
   evaluate against design brief:
     - layout alignment, spacing
@@ -498,11 +541,44 @@ Present the directives to the user for approval before spawning agents.
 
 ### Step 3: Dispatch Sub-Agents in Isolated Worktrees
 
-Spawn one sub-agent per variation using the **Agent tool with `isolation: "worktree"`**. The harness creates each worktree automatically, runs the agent inside it, and returns the resulting branch name and path on completion. Do **not** create worktrees manually beforehand — `isolation: "worktree"` already handles that and would conflict with manual creation.
+**Setup — prefer Agent Teams when available:**
 
-Send all sub-agent calls in a **single message with multiple Agent tool uses** so they run in parallel.
+```
+if env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS == "1":
+  TeamCreate(team_name: "design-exploration", description: "Parallel design variations")
+  use_teams = true
+else:
+  warn user: "Agent Teams not enabled — using ad-hoc Agent + name + SendMessage (best-effort coordination). For reliable mid-flight updates, set CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1."
+  use_teams = false
+```
 
-Prompt template for each sub-agent:
+**Spawn — single message, multiple Agent calls (parallel execution):**
+
+```
+for each variation in [A, B, C, ...]:
+  Agent(
+    subagent_type: "general-purpose",
+    name: "design-variation-{letter}",
+    team_name: "design-exploration"  # ONLY if use_teams
+    isolation: "worktree",            # harness creates the worktree, returns branch + path
+    run_in_background: true,
+    prompt: <skill prompt template — see below>
+  )
+```
+
+Do **NOT** create worktrees manually — `isolation: "worktree"` already handles that. Do **NOT** use a custom engineer agent type if your project's gitflow rules conflict with `isolation: "worktree"` — `general-purpose` is the safe default for design exploration.
+
+**Mid-flight updates:**
+
+```
+SendMessage(to: "design-variation-{letter}", message: "<update>")
+# delivered at the teammate's next tool round
+# Agent Teams: reliable; ad-hoc named Agents: best-effort
+```
+
+**Browser tools are SHARED, not per-agent:** Playwright MCP exposes ONE browser instance per session. Sub-agents trying to use it concurrently will serialize or collide. **Sub-agents must NOT call Playwright tools in this skill.** Visual verification (M8) happens in Step 4 (Convergence), driven by the parent agent serially per variation.
+
+**Prompt template for each sub-agent:**
 
 ```markdown
 You are a UX designer creating variation {LETTER} of a design. You are running in an isolated git worktree — work here, commit here, and the parent agent will merge your branch.
@@ -513,47 +589,81 @@ You are a UX designer creating variation {LETTER} of a design. You are running i
 ## Your Variation Direction
 {variation-specific directive — e.g., "Dark mode with neon accents and immersive scroll animations"}
 
+## Working Directory
+{tell the agent where the actual project root is — e.g., `web/` for a marketing site in a monorepo. Include port assignment for dev server if running multiple variations: A=4321, B=4322, C=4323.}
+
+## Feature Flags / Env Vars
+{list any PUBLIC_*/VITE_*/NEXT_PUBLIC_* env vars discovered in Phase 1 Step 2 that gate UI states. Tell the agent to set them when running `npm run dev` so dev-time UI renders correctly.}
+
+## Screenshot Output Path
+
+If you capture screenshots (via raw Node + project-installed Playwright — NOT the Playwright MCP, see Instructions §5), save them to `<project_root>/.design/screenshots/variation-{letter}/` with the filename pattern `{page}-{viewport}.png`. Examples: `home-desktop.png`, `contact-mobile.png`. This is the canonical path the parent agent reads during convergence.
+
 ## Instructions
 1. Follow the milestones from the brief in order
 2. Use the framework specified in the brief
 3. Commit after each milestone with message: "design(variation-{letter}): {milestone description}"
 4. If Storybook is part of the brief, generate stories for each component you build
-5. **Work autonomously — you cannot interact with the user.** AskUserQuestion is not available to sub-agents. If you hit a genuinely blocking ambiguity, stop and report it back instead of guessing or improvising. Otherwise, follow the brief and your variation direction; minor judgment calls are yours to make.
-6. When all milestones are complete, report:
-   - Branch name (current branch)
+5. **Do NOT call the Playwright MCP** (`mcp__playwright__browser_*`). The MCP exposes ONE shared browser per session — parallel sub-agents collide. If you need screenshots, use raw Node with the project's `@playwright/test` install (or `npx playwright install chromium` first if not present): write a small script that launches its own browser, navigates, and saves to the canonical path above. Otherwise skip M8 and let the parent agent capture during convergence.
+6. **Work autonomously — you cannot interact with the user.** AskUserQuestion is not available to sub-agents. If you hit a genuinely blocking ambiguity, stop and report it back instead of guessing. Minor judgment calls are yours.
+7. When all milestones are complete, report:
+   - Branch name (run `git branch --show-current`)
+   - Worktree path (run `pwd` from the worktree root)
    - 2-3 sentence summary of your approach
    - What makes this variation distinct
-   - Path to any final screenshots if Playwright is available
+   - Path to screenshots if captured (`<project_root>/.design/screenshots/variation-{letter}/`)
+   - Any blockers, gaps, or judgment calls the user should know about
 ```
 
 ### Step 4: Convergence
 
+Parent agent drives this serially — Playwright MCP has ONE browser instance, so screenshots happen one variation at a time.
+
 ```
 on all sub-agents complete:
-  results = harness returns {worktree_path, branch_name} per agent
+  results = {worktree_path, branch_name, summary} per variation
 
-  if playwright_available:
-    for each variation:
-      navigate variation's dev server (or git checkout branch)
-      browser_take_screenshot()
-    present side-by-side comparison
+  # Visual capture — SERIAL because browser is shared
+  # Prefer reading screenshots sub-agents already wrote to .design/screenshots/variation-{letter}/
+  # Only re-capture if a sub-agent reported "skipped M8" or screenshots are missing.
+  if playwright_available AND screenshots_missing:
+    for each variation in order:
+      cd <worktree>/<project_subdir>
+      npm install (if node_modules missing)
+      npm run dev -- --port <unique_port> &  # background, with feature-flag env vars
+      wait for server ready
+      browser_resize(1440x900); browser_navigate(http://localhost:<port>)
+      browser_take_screenshot(path: ".design/screenshots/variation-{letter}/{page}-desktop.png")
+      browser_resize(375x812); browser_take_screenshot(path: ".design/screenshots/variation-{letter}/{page}-mobile.png")
+    present side-by-side: read images from each worktree's .design/screenshots/variation-{letter}/
+
   else:
     present text summary per variation (directive + approach)
 
-  winner = ask user via AskUserQuestion ("Which variation should we ship?")
+  # Decision (or trial-mode pause)
+  if trial_mode (user wants external review, no commitment yet):
+    keep all worktrees + dev servers running
+    hand off URLs + screenshots to user
+    skip merge / cleanup
+  else:
+    winner = ask user via AskUserQuestion ("Which variation should we ship?")
+    git checkout main
+    git merge design/variation-{winner}
+    git branch -D design/variation-{losers...}
 
-  git checkout main
-  git merge design/variation-{winner}
-  git branch -D design/variation-{losers...}
+    # Worktrees auto-clean on agent completion if no changes were made.
+    git worktree list                      # verify
+    git worktree remove {path}             # explicit cleanup if any remain
 
-  # Worktrees auto-clean on agent completion if no changes were made.
-  git worktree list                      # verify
-  git worktree remove {path}             # explicit cleanup if any remain
+    if use_teams:
+      for each teammate: SendMessage(to: name, message: {type: "shutdown_request"})
+      wait for shutdowns
+      TeamDelete()
 
-  continue iterating on merged result
+    continue iterating on merged result
 ```
 
-**Note:** For explicit worktree-path control (e.g., multiple dev servers running simultaneously for live comparison), create worktrees manually with `git worktree add` and dispatch sub-agents WITHOUT `isolation: "worktree"`. You then own cleanup.
+**Note:** For explicit worktree-path control (e.g., long-running comparison branches), create worktrees manually with `git worktree add` and dispatch sub-agents WITHOUT `isolation: "worktree"`. You then own cleanup.
 
 ---
 
