@@ -86,15 +86,18 @@ Diff size is informational only. Domain expertise is the constant — every revi
 
 ## PE Agent Selection
 
-The plugin ships three built-in PE sub-agents:
+The plugin ships four built-in PE sub-agents:
 
 | Subagent | Domain | File patterns |
 | --- | --- | --- |
 | `code-reviewer:pe-backend` | Go / PostgreSQL / AWS Lambda | `*.go`, `go.mod`, `go.sum`, `*.sql` |
 | `code-reviewer:pe-frontend` | Vue 3 / Nuxt 3 / TS / Tailwind / Storybook | `*.vue`, `*.tsx`, `*.jsx`, `tailwind.config.*`, `nuxt.config.*`, `vite.config.*`, `*.stories.*` |
 | `code-reviewer:pe-devops` | AWS CDK / Cloudflare CDKTF / Terraform / Docker / GH Actions | `cdk.json`, `*.tf`, `*.tfvars`, `Dockerfile*`, `docker-compose*`, `.github/workflows/*.yml` |
+| `code-reviewer:pe-governance` | Agent definitions, skills, plugin instructions, CLAUDE.md | `.claude/agents/*.md`, `**/SKILL.md`, `plugins/**/agents/*.md`, `**/CLAUDE.md`, `.claude/rules/*.md`, `docs/rules/*.md` |
 
 Each agent has its own model (`claude-opus-4-7`), tools, and self-contained three-pass protocol — they do NOT need a reference file at runtime.
+
+`pe-governance` reviews documents whose audience is the model (agent governance markdown). It does NOT review documents whose audience is humans (ADRs at `docs/architecture/*.md`, runbooks at `docs/runbooks/*.md`, review docs at `docs/code-reviews/*.md`, READMEs). Those fall to generic three-pass review.
 
 ### Selection Priority
 
@@ -150,6 +153,14 @@ Pass 2 — Quality + Tests: code quality + RUN THE TEST SUITE. Test failures
 Pass 3 — Security: top 1% strict. OWASP Top 10, auth, secrets, injection,
                    supply chain. "Would this survive a pentest?", not "is this
                    probably fine?". Assume an attacker is reading the diff.
+
+                   Cross-file claim verification: when the diff includes
+                   documentation that describes runtime security posture
+                   (IAM/RBAC/permissions/auth claims), verify the doc's
+                   claim against the actual runtime artifact (CDK stack,
+                   IAM policy file, workflow YAML, role trust policy).
+                   Doc-vs-artifact drift is a security-grade finding —
+                   readers and operators trust the doc.
 ```
 
 ### Dispatch
@@ -312,6 +323,57 @@ if yes:
     CHANGES REQUESTED → gh pr review <PR> --request-changes
     BLOCKED           → gh pr review <PR> --request-changes
 ```
+
+### Step 5: External Review Consolidation (PR Reviews Only, optional)
+
+External reviewers (Copilot, third-party bots, human reviewers via GitHub UI)
+post review comments asynchronously. Their comments are pinned to a specific
+commit SHA. When HEAD advances past that SHA, some comments may already be
+addressed by remediation commits.
+
+```
+Prompt: "Pull external PR review comments and consolidate against current HEAD?"
+
+if yes:
+  fetch open review threads:
+    gh api graphql -f query='
+      query { repository(owner, name) {
+        pullRequest(number) {
+          reviewThreads(first: 50) {
+            nodes { id isResolved comments(first: 1) {
+              nodes { databaseId author { login } path line body
+                      commit { oid } }
+            } }
+          }
+        }
+      }'
+
+  for each thread where isResolved == false:
+    comment_sha = thread.comments[0].commit.oid
+    if HEAD == comment_sha:
+      status = "current"          # comment matches HEAD; full review needed
+    else:
+      # HEAD advanced — verify the comment's claim still holds
+      grep the comment's claimed-missing or claimed-broken pattern against
+      current HEAD's file at the comment's path.
+      if pattern not found at HEAD:
+        status = "stale"          # already addressed; reply with pointer to fixing commit
+      else:
+        status = "current"        # claim still holds at HEAD
+
+  for each thread:
+    if status == "stale":
+      reply via gh api repos/{owner}/{repo}/pulls/{N}/comments/{commentId}/replies:
+        "Already resolved in {sha} ({short message of fixing commit}). ✅"
+      resolve thread via GraphQL resolveReviewThread mutation
+    if status == "current":
+      evaluate finding; if agree, fix in a remediation commit; reply with
+      "Fixed in {sha}. ✅" and resolve thread; if disagree, reply with
+      reasoning and leave thread open for author response.
+```
+
+External-review consolidation is optional — skip when reviewing pure branch
+diffs or when no external reviews exist.
 
 ---
 

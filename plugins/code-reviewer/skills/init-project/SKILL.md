@@ -8,11 +8,12 @@ description: Scan the current project and initialize CLAUDE.md with a Stack Map 
 Bootstraps the `/code-reviewer` skill into any project by scanning the repo
 and writing a Stack Map into the project's `CLAUDE.md` (or `.code-reviewer.yml`).
 
-The three built-in PE sub-agents — `code-reviewer:pe-backend`,
-`code-reviewer:pe-frontend`, `code-reviewer:pe-devops` — ship with the plugin
-as proper agents. This skill does NOT regenerate them. For stacks not covered
-by a built-in PE (Rust, Python, Java, C#, etc.), the code-reviewer skill falls
-back to a generic three-pass review using the Stack Map's test commands.
+The four built-in PE sub-agents — `code-reviewer:pe-backend`,
+`code-reviewer:pe-frontend`, `code-reviewer:pe-devops`,
+`code-reviewer:pe-governance` — ship with the plugin as proper agents.
+This skill does NOT regenerate them. For stacks not covered by a built-in
+PE (Rust, Python, Java, C#, etc.), the code-reviewer skill falls back to
+a generic three-pass review using the Stack Map's test commands.
 
 ---
 
@@ -40,6 +41,7 @@ The "Built-in PE" column maps a detected stack to one of the three plugin-shippe
 | `pyproject.toml`, `requirements.txt`, `*.py` | Python | Generic |
 | `*.java`, `pom.xml`, `build.gradle` | Java | Generic |
 | `*.cs`, `*.csproj`, `*.sln` | C# / .NET | Generic |
+| `.claude/agents/*.md`, `**/SKILL.md`, `plugins/**/agents/*.md`, `**/CLAUDE.md`, `.claude/rules/*.md`, `docs/rules/*.md` | Agent governance markdown | `pe-governance` |
 
 ### Framework Detection
 
@@ -132,9 +134,17 @@ Generate a Stack Map table and prompt the user to add it to their `CLAUDE.md`:
 | crew/** | Vue/Nuxt | `pe-frontend` | `cd crew && npm run typecheck && npm test` |
 | cdk/** | CDK TypeScript | `pe-devops` | `cd cdk && npm test && npx cdk synth --all` |
 | api/** | Python | Generic | `cd api && pytest` |
+| .claude/agents/**, **/SKILL.md, plugins/**/agents/*.md, **/CLAUDE.md, .claude/rules/*.md, docs/rules/*.md | Agent governance markdown | `pe-governance` | n/a (lint-shaped checks built into PE) |
+| docs/architecture/** | ADRs (humans) | Generic | n/a (architectural-consistency review) |
+| docs/code-reviews/**, docs/runbooks/**, README.md | Human-targeted docs | (skip) | n/a |
 ```
 
-The "Built-in PE" column drives `code-reviewer` dispatch. `Generic` rows are reviewed by the parent skill directly using the listed test command (no PE sub-agent dispatch).
+The "Built-in PE" column drives `code-reviewer` dispatch. `Generic` rows are reviewed by the parent skill directly using the listed test command (no PE sub-agent dispatch). `(skip)` rows are not reviewed.
+
+**Audience-boundary rule for markdown:**
+- Files whose audience is the model (agent definitions, skills, plugin instructions, CLAUDE.md) → `pe-governance` enforces pseudocode + schemas + literal commands + tool-permission consistency
+- Files whose audience is humans (ADRs, runbooks, review docs, READMEs) → generic review or skip; prose is the right form
+- Hybrid documents (e.g., ADR with embedded pseudocode flow blocks) apply the rule per-section based on each section's audience
 
 ### 5b: Summary Report
 
@@ -153,9 +163,10 @@ Stacks detected:
 Stack Map written to: CLAUDE.md (or .code-reviewer.yml if preferred)
 
 Built-in PE sub-agents that will be dispatched:
-  - code-reviewer:pe-backend  (ships with plugin)
-  - code-reviewer:pe-frontend (ships with plugin)
-  - code-reviewer:pe-devops   (ships with plugin)
+  - code-reviewer:pe-backend     (ships with plugin)
+  - code-reviewer:pe-frontend    (ships with plugin)
+  - code-reviewer:pe-devops      (ships with plugin)
+  - code-reviewer:pe-governance  (ships with plugin)
 
 Stacks NOT covered by a built-in PE:
   - {if any} Python (api/), Rust (engine/) → generic three-pass review
