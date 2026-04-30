@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: This skill should be used when performing code reviews, PR reviews, reviewing code changes, or analyzing code quality. Routes by Stack Map — dispatches stack-specific PE sub-agents (pe-backend, pe-frontend, pe-devops) per matched stack regardless of diff size; falls back to a generic three-pass review only when no PE matches. Focuses only on changed code with scope discipline. Locks each round to the reviewed SHA so post-approval commits invalidate prior approval. Produces de-duplicated, actionable findings in ./docs/code-reviews/.
+description: Code reviews with stack-specific PE dispatch (pe-go, pe-vue, pe-aws-infra). Three-pass protocol, scope discipline, SHA-locked rounds, de-duplicated findings in ./docs/code-reviews/.
 ---
 
 # Expert Code Review
@@ -90,9 +90,9 @@ The plugin ships four built-in PE sub-agents:
 
 | Subagent | Domain | File patterns |
 | --- | --- | --- |
-| `code-reviewer:pe-backend` | Go / PostgreSQL / AWS Lambda | `*.go`, `go.mod`, `go.sum`, `*.sql` |
-| `code-reviewer:pe-frontend` | Vue 3 / Nuxt 3 / TS / Tailwind / Storybook | `*.vue`, `*.tsx`, `*.jsx`, `tailwind.config.*`, `nuxt.config.*`, `vite.config.*`, `*.stories.*` |
-| `code-reviewer:pe-devops` | AWS CDK / Cloudflare CDKTF / Terraform / Docker / GH Actions | `cdk.json`, `*.tf`, `*.tfvars`, `Dockerfile*`, `docker-compose*`, `.github/workflows/*.yml` |
+| `code-reviewer:pe-go` | Go / PostgreSQL / AWS Lambda | `*.go`, `go.mod`, `go.sum`, `*.sql` |
+| `code-reviewer:pe-vue` | Vue 3 / Nuxt 3 / TS / Tailwind / Storybook | `*.vue`, `*.tsx`, `*.jsx`, `tailwind.config.*`, `nuxt.config.*`, `vite.config.*`, `*.stories.*` |
+| `code-reviewer:pe-aws-infra` | AWS CDK / Cloudflare CDKTF / Terraform / Docker / GH Actions | `cdk.json`, `*.tf`, `*.tfvars`, `Dockerfile*`, `docker-compose*`, `.github/workflows/*.yml` |
 | `code-reviewer:pe-governance` | Agent definitions, skills, plugin instructions, CLAUDE.md | `.claude/agents/*.md`, `**/SKILL.md`, `plugins/**/agents/*.md`, `**/CLAUDE.md`, `.claude/rules/*.md`, `docs/rules/*.md` |
 
 Each agent has its own model (`claude-opus-4-7`), tools, and self-contained three-pass protocol — they do NOT need a reference file at runtime.
@@ -407,7 +407,7 @@ If it's worth reporting, it's worth fixing. LOW and INFO are awareness items —
 PE sub-agents return findings in this exact format. Primary agent parses YAML blocks and consolidates into the final report.
 
 ```yaml
-expert: PE-Backend|PE-Frontend|PE-DevOps|Primary
+expert: PE-Go|PE-Vue|PE-AWS-Infra|Primary
 findings:
   - id: "CRITICAL-001"
     severity: CRITICAL
