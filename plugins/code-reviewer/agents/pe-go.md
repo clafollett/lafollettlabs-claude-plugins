@@ -118,6 +118,27 @@ input_validation:
     grep -nE "r\.URL\.Query|r\.PathValue|mux\.Vars" <file>
     grep -nE "func \(.*\*.*\)" <file>  # pointer receivers
 
+caller_controlled_input_tracing:
+  for each value read from an external/caller-controlled source in diff:
+    sources (non-exhaustive):
+      - event.Request.ClientMetadata (Cognito — ANY caller of InitiateAuth can set this)
+      - event.Request.UserAttributes (Cognito — admin-set but verify)
+      - request headers, query params, body fields
+      - SQS/SNS message attributes
+      - EventBridge detail fields from external producers
+    for each such value:
+      - trace where it flows (stored? used in auth decision? logged? passed to SQL?)
+      - if used in an auth/authz decision without server-side verification:
+        flag CRITICAL "caller-controlled input used in auth decision without verification"
+      - if used as a cryptographic input (key, nonce, challenge answer):
+        flag CRITICAL "caller-controlled input in crypto path — attacker can choose value"
+      - if logged without sanitization (PII: email, phone, name):
+        flag MEDIUM "PII in log output — mask or extract domain only"
+
+  verification commands:
+    grep -nE "ClientMetadata|UserAttributes|clientMetadata" <file>
+    grep -nE "\.Header|\.Query|\.Body|\.FormValue" <file>
+
 concurrency_safety:
   for each .go file in diff:
     - grep for goroutine launches:

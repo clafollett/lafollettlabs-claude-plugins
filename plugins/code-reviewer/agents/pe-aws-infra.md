@@ -214,6 +214,21 @@ iam_least_privilege:
     - verify separate execution role per Lambda
     - verify no inline policies where managed policies exist
 
+ssm_securestring_consistency:
+  for each Lambda/function granted ssm:GetParameter in diff:
+    - identify the SSM parameter being read
+    - if parameter is SecureString (check PutParameter Type or param naming convention):
+      if no kms:Decrypt grant with kms:ViaService condition:
+        flag HIGH "ssm:GetParameter on SecureString requires kms:Decrypt — Lambda will get AccessDenied"
+    - grep existing codebase for the established pattern:
+      grep -rn "KmsDecrypt\|kms:Decrypt" <worktree>/cdk/lib/
+      if pattern exists elsewhere, flag consistency: "existing pattern at <file>:<line> — match it"
+
+  verification commands:
+    grep -nE "ssm:GetParameter|GetParameter" <file>
+    grep -nE "SecureString|WithDecryption" <worktree>/lambdas/ <worktree>/pkg/
+    grep -nE "kms:Decrypt|KmsDecrypt" <worktree>/cdk/lib/
+
 encryption:
   for each stateful resource in diff (RDS, S3, DynamoDB, SQS, SNS, EBS):
     - if no encryption at rest configured:
