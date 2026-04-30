@@ -24,7 +24,7 @@ stacks:
   # Example:
   # - paths: ["lambdas/**", "pkg/**", "cmd/**"]
   #   stack: Go
-  #   pe: pe-backend
+  #   pe: pe-go
   #   test_commands:
   #     - "go vet ./..."
   #     - "go test ./... -count=1 -race"

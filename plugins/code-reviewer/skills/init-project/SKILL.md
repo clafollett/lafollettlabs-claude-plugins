@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: Scan the current project and initialize CLAUDE.md with a Stack Map for the code-reviewer skill. Detects languages, frameworks, test commands, and directory structure automatically. Built-in PE sub-agents (pe-backend, pe-frontend, pe-devops) ship with the plugin — this skill does NOT generate per-project PE files.
+description: Scan the project and write a Stack Map to CLAUDE.md for /code-reviewer. Detects languages, frameworks, test commands. PEs (pe-go, pe-vue, pe-aws-infra) ship with the plugin.
 ---
 
 # Initialize Project for Code Review
@@ -8,8 +8,8 @@ description: Scan the current project and initialize CLAUDE.md with a Stack Map 
 Bootstraps the `/code-reviewer` skill into any project by scanning the repo
 and writing a Stack Map into the project's `CLAUDE.md` (or `.code-reviewer.yml`).
 
-The four built-in PE sub-agents — `code-reviewer:pe-backend`,
-`code-reviewer:pe-frontend`, `code-reviewer:pe-devops`,
+The four built-in PE sub-agents — `code-reviewer:pe-go`,
+`code-reviewer:pe-vue`, `code-reviewer:pe-aws-infra`,
 `code-reviewer:pe-governance` — ship with the plugin as proper agents.
 This skill does NOT regenerate them. For stacks not covered by a built-in
 PE (Rust, Python, Java, C#, etc.), the code-reviewer skill falls back to
@@ -23,20 +23,20 @@ Scan the repository for language markers, build files, and framework configs.
 
 ### Language Detection
 
-The "Built-in PE" column maps a detected stack to one of the three plugin-shipped agents (`pe-backend`, `pe-frontend`, `pe-devops`). "Generic" means no built-in agent matches — code-reviewer falls back to a generic three-pass review for that stack.
+The "Built-in PE" column maps a detected stack to one of the three plugin-shipped agents (`pe-go`, `pe-vue`, `pe-aws-infra`). "Generic" means no built-in agent matches — code-reviewer falls back to a generic three-pass review for that stack.
 
 | Marker | Stack | Built-in PE |
 | --- | --- | --- |
-| `go.mod`, `*.go` | Go | `pe-backend` |
-| `package.json` + `*.vue` | Vue/Nuxt | `pe-frontend` |
-| `package.json` + `*.tsx`/`*.jsx` | React | `pe-frontend` |
-| `package.json` + `*.svelte` | Svelte | `pe-frontend` |
-| `cdk.json`, `*.ts` in `cdk/` or `infra/` | AWS CDK | `pe-devops` |
-| `cdktf.json` | CDKTF | `pe-devops` |
-| `*.tf` | Terraform | `pe-devops` |
-| `Dockerfile*`, `docker-compose*` | Docker | `pe-devops` |
-| `.github/workflows/*.yml` | GitHub Actions CI/CD | `pe-devops` |
-| `.gitlab-ci.yml` | GitLab CI/CD | `pe-devops` |
+| `go.mod`, `*.go` | Go | `pe-go` |
+| `package.json` + `*.vue` | Vue/Nuxt | `pe-vue` |
+| `package.json` + `*.tsx`/`*.jsx` | React | `pe-vue` |
+| `package.json` + `*.svelte` | Svelte | `pe-vue` |
+| `cdk.json`, `*.ts` in `cdk/` or `infra/` | AWS CDK | `pe-aws-infra` |
+| `cdktf.json` | CDKTF | `pe-aws-infra` |
+| `*.tf` | Terraform | `pe-aws-infra` |
+| `Dockerfile*`, `docker-compose*` | Docker | `pe-aws-infra` |
+| `.github/workflows/*.yml` | GitHub Actions CI/CD | `pe-aws-infra` |
+| `.gitlab-ci.yml` | GitLab CI/CD | `pe-aws-infra` |
 | `Cargo.toml`, `*.rs` | Rust | Generic |
 | `pyproject.toml`, `requirements.txt`, `*.py` | Python | Generic |
 | `*.java`, `pom.xml`, `build.gradle` | Java | Generic |
@@ -79,7 +79,7 @@ find <dir> -type f -name '*.*' | sed 's/.*\.//' | sort | uniq -c | sort -rn | he
 ```
 
 Build a path → stack → PE mapping. Group directories that share the same
-stack (e.g., `lambdas/` and `pkg/` are both Go → PE-Backend).
+stack (e.g., `lambdas/` and `pkg/` are both Go → PE-Go).
 
 ---
 
@@ -130,9 +130,9 @@ Generate a Stack Map table and prompt the user to add it to their `CLAUDE.md`:
 
 | Path | Stack | Built-in PE | Test Command |
 | --- | --- | --- | --- |
-| lambdas/**, pkg/** | Go | `pe-backend` | `go vet ./... && go test ./... -count=1 -race` |
-| crew/** | Vue/Nuxt | `pe-frontend` | `cd crew && npm run typecheck && npm test` |
-| cdk/** | CDK TypeScript | `pe-devops` | `cd cdk && npm test && npx cdk synth --all` |
+| lambdas/**, pkg/** | Go | `pe-go` | `go vet ./... && go test ./... -count=1 -race` |
+| crew/** | Vue/Nuxt | `pe-vue` | `cd crew && npm run typecheck && npm test` |
+| cdk/** | CDK TypeScript | `pe-aws-infra` | `cd cdk && npm test && npx cdk synth --all` |
 | api/** | Python | Generic | `cd api && pytest` |
 | .claude/agents/**, **/SKILL.md, plugins/**/agents/*.md, **/CLAUDE.md, .claude/rules/*.md, docs/rules/*.md | Agent governance markdown | `pe-governance` | n/a (lint-shaped checks built into PE) |
 | docs/architecture/** | ADRs (humans) | Generic | n/a (architectural-consistency review) |
@@ -154,18 +154,18 @@ Print a summary of what was detected and where things went:
 === Project Initialized for Code Review ===
 
 Stacks detected:
-  - Go (pe-backend):       lambdas/, pkg/
-  - Vue/Nuxt (pe-frontend): crew/
-  - CDK TypeScript (pe-devops):    cdk/
-  - CDKTF TypeScript (pe-devops):  cloudflare/
-  - GitHub Actions (pe-devops):    .github/workflows/
+  - Go (pe-go):             lambdas/, pkg/
+  - Vue/Nuxt (pe-vue):      crew/
+  - CDK TypeScript (pe-aws-infra):    cdk/
+  - CDKTF TypeScript (pe-aws-infra):  cloudflare/
+  - GitHub Actions (pe-aws-infra):    .github/workflows/
 
 Stack Map written to: CLAUDE.md (or .code-reviewer.yml if preferred)
 
 Built-in PE sub-agents that will be dispatched:
-  - code-reviewer:pe-backend     (ships with plugin)
-  - code-reviewer:pe-frontend    (ships with plugin)
-  - code-reviewer:pe-devops      (ships with plugin)
+  - code-reviewer:pe-go           (ships with plugin)
+  - code-reviewer:pe-vue          (ships with plugin)
+  - code-reviewer:pe-aws-infra   (ships with plugin)
   - code-reviewer:pe-governance  (ships with plugin)
 
 Stacks NOT covered by a built-in PE:
