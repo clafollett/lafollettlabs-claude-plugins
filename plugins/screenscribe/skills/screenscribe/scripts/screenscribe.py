@@ -1,0 +1,1008 @@
+#!/usr/bin/env python3
+"""
+screenscribe — turn a tutorial video into a bundle Claude can actually *watch*.
+
+Transcripts drop the payload. In a screencast the information lives in the pixels
+(terminal, file tree, IDE state, diagrams), so we sample frames at a fixed rate,
+drop the visually-identical ones, and keep the survivors named by timestamp.
+
+Nothing here summarizes. Density is the product; compression happens later, with
+the user in the loop.
+
+Two modes:
+
+    build   video -> bundle/          sample densely, store everything
+    window  bundle + span -> stdout   read back a slice that fits in context
+
+`build` is deliberately greedy — disk is cheap, and a frame you culled at
+extraction time is gone. `window` is where the context budget is enforced,
+because that is the only place that knows what you are looking for.
+
+Output tree:
+    out/<video_id>/
+        BUNDLE.md      <- nav map: meta, chapters, full transcript, frame index
+        frames/        <- deduped frames, named HH-MM-SS.jpg
+        meta.json      <- title, channel, duration, chapters, frame inventory
+
+Install:
+    pip install yt-dlp imagehash pillow
+    ffmpeg must be on PATH
+
+Usage:
+    ./screenscribe.py build "https://youtu.be/VIDEO_ID"
+    ./screenscribe.py build "<url>" --fps 2 --phash-distance 4
+    ./screenscribe.py window bundles/VIDEO_ID 12:00 18:00
+
+Bundles are written to --out, else $SCREENSCRIBE_BUNDLES, else ~/.screenscribe/bundles.
+`window` also accepts a bare video id, resolved against that root:
+
+    ./screenscribe.py window VIDEO_ID 12:00 18:00
+
+Pass `-o ./bundles` when you want the bundle to live with the project instead.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# --------------------------------------------------------------------------
+# Config defaults.
+#
+# FRAME_WIDTH is not a taste call. Claude downscales anything over ~1.15
+# megapixels, so 1408x792 (1.12 MP, ~1487 tokens) is the last width whose
+# pixels survive the trip. 1568 and 1920 cost more bytes and arrive identical.
+#
+# FPS 1.0 matches the granularity transcripts are already cut at, and is dense
+# enough to catch a command between the moment it is typed and the moment it
+# scrolls away.
+# --------------------------------------------------------------------------
+FPS = 1.0
+FRAME_WIDTH = 1408
+TOKENS_PER_FRAME = 1487  # 1408*792/750, for the window budget estimate
+WINDOW_TOKEN_CAP = 400_000   # above this `window` refuses without --force
+
+# An artifact page embeds its frames as data: URIs — the artifact runtime serves
+# no asset store — so the page budget is the constraint. 900px is ample for
+# reading a terminal on screen, and DISPLAY_DISTANCE culls harder than the build
+# pass: a moving webcam leaves a hundred near-identical frames that make the page
+# heavy without making it clearer.
+ARTIFACT_WIDTH = 900
+ARTIFACT_QUALITY = 72
+DISPLAY_DISTANCE = 40
+ARTIFACT_SOFT_LIMIT = 12 * 1024 * 1024   # page cap is 16 MB; leave headroom
+
+# phash at the library default (hash_size=8, a 32x32 grayscale DCT) cannot see
+# screencast text at all. Measured on a 6-scene terminal recording, frames
+# showing entirely different commands scored 0, 0, 4, 6, 14 apart — three of the
+# five real transitions fell under the old default of 6, so half the video was
+# discarded while the run reported success.
+#
+# hash_size=16 (256-bit) separates cleanly on the same input: 26 minimum between
+# distinct scenes, 0 between identical ones. 10 sits well inside that gap.
+PHASH_SIZE = 16
+PHASH_DISTANCE = 10      # hamming distance below which two frames are "the same"
+
+VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".mov", ".m4v", ".flv", ".avi")
+URL_RE = re.compile(r"https?://[^\s<>\")\]]+")
+
+# Affiliate, social and channel-promo links crowd out the technical ones. Note
+# what is NOT here: youtube.com/watch and youtu.be stay, because a description
+# linking a prerequisite video is exactly the context worth keeping — only the
+# subscribe call-to-action is filtered.
+LINK_NOISE = (
+    # affiliate / storefront
+    "amzn.to", "amazon.", "bit.ly", "linktr.ee", "epidemicsound", "skl.sh",
+    "brilliant.org/", "squarespace.com/", "nordvpn", "honey.", "impact.com",
+    # tip jars
+    "/patreon", "patreon.com", "buymeacoffee", "ko-fi.com", "paypal.",
+    # social and chat
+    "twitter.com", "x.com/", "instagram.com", "tiktok.com", "facebook.com",
+    "discord.gg", "t.me/", "threads.net", "bsky.app", "mastodon",
+    # channel promo
+    "sub_confirmation", "buzzsprout", "anchor.fm", "spotify.com/show",
+    "podcasts.apple.com",
+)
+
+# Where bundles live: --out, then $SCREENSCRIBE_BUNDLES, then ~/.screenscribe/bundles.
+#
+# The default is under $HOME, not ./bundles, for two reasons. A bundle runs
+# 100-240 MB, so a cwd-relative default drops that into whatever repo you happen
+# to be standing in and obliges every one of them to carry its own gitignore
+# entry. And one video often informs several projects, so a single library means
+# one download instead of one per checkout. Pass `-o ./bundles` when you do want
+# the bundle to live with the work.
+BUNDLES_ENV = "SCREENSCRIBE_BUNDLES"
+DEFAULT_BUNDLES = Path("~/.screenscribe/bundles")
+
+# yt-dlp's id is network-derived, not a constrained token. For a URL that falls
+# through to the generic extractor it is `unquote(last path segment)`, so
+# `https://host/..%2f..%2fwork.mp4` yields the id `../../work` — real separators.
+# Unsanitized that reaches `out / id`, and every write below it escapes: frames
+# and meta.json land outside --out, an existing BUNDLE.md there is overwritten,
+# and a directory named `frames` there is deleted. YouTube ids are
+# [A-Za-z0-9_-]{11} and pass through this untouched.
+ID_SAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+# Auto-captions are the common case — most videos have no author-uploaded track.
+# The overlap merge below is only correct for the rolling form, and `find_vtt`
+# prefers the manual track, so running it unconditionally deletes legitimately
+# repeated speech ("run the test" / "run the test again" -> "run the test",
+# "again").
+#
+# Detected on content, not markup. Inline <00:00:01.500> cue timestamps look like
+# a rolling marker but are legal karaoke markup in hand-authored tracks too, so a
+# manual track carrying them tripped the merge and swallowed real repeats. What
+# actually distinguishes a rolling track is behaviour: it repeats the previous
+# cue's tail at most boundaries, and nothing else does.
+ROLLING_THRESHOLD = 0.5
+ROLLING_MIN_CUES = 8   # below this there is not enough signal; assume not rolling
+MIN_OVERLAP = 3        # a 1-2 word coincidence is speech, not a rolling repeat
+
+
+@dataclass
+class Cue:
+    """One transcript cue: when it was said, and what was said."""
+    start: float
+    text: str
+
+
+@dataclass
+class Frame:
+    """One sampled frame and the timestamp it was pulled from."""
+    ts: float
+    path: Path
+
+
+def bundles_root() -> Path:
+    """Default bundle root. `--out` overrides this; it does not consult it."""
+    env = os.environ.get(BUNDLES_ENV, "").strip()
+    if env:
+        return Path(env).expanduser()
+    try:
+        return DEFAULT_BUNDLES.expanduser()
+    except RuntimeError:
+        sys.exit(f"cannot resolve {DEFAULT_BUNDLES} — "
+                 f"set ${BUNDLES_ENV} or pass --out")
+
+
+def safe_dest(root: Path, video_id: str) -> Path:
+    """One directory under `root`, named after the video. Never outside it."""
+    # No .strip("_") — underscore is a legal YouTube id character, and stripping
+    # it renames the bundle away from the id the spec's Watch: line cites.
+    # A pathological id like ".." sanitizes to the literal dirname "__", which is
+    # contained and harmless.
+    name = ID_SAFE.sub("_", video_id)[:64]
+    if not name:
+        sys.exit(f"unusable video id {video_id!r} — cannot name a bundle directory")
+    dest = (root / name).resolve()
+    if dest != root.resolve() and root.resolve() not in dest.parents:
+        sys.exit(f"refusing to write outside {root}: {dest}")
+    return dest
+
+
+def resolve_bundle(arg: Path) -> Path:
+    """Accept a path to a bundle, or a bare video id to look up in the root.
+
+    `window <id>` is the common case once a central library exists — the user
+    knows the video, not where the library happens to be mounted.
+    """
+    if (arg / "meta.json").is_file():
+        return arg
+    candidate = bundles_root() / arg
+    if (candidate / "meta.json").is_file():
+        return candidate
+    sys.exit(
+        f"not a bundle: no meta.json at {arg} or {candidate}\n"
+        f"set ${BUNDLES_ENV} or pass the bundle directory directly"
+    )
+
+
+# --------------------------------------------------------------------------
+# Time helpers
+# --------------------------------------------------------------------------
+def hhmmss(seconds: float, sep: str = ":") -> str:
+    s = int(seconds)
+    return f"{s // 3600:02d}{sep}{(s % 3600) // 60:02d}{sep}{s % 60:02d}"
+
+
+def parse_span(text: str) -> float:
+    """Accept SS, MM:SS, or HH:MM:SS. Rejects anything else loudly."""
+    parts = text.strip().split(":")
+    if not 1 <= len(parts) <= 3 or not all(p.isascii() and p.isdigit() for p in parts):
+        sys.exit(f"bad timestamp {text!r} — expected SS, MM:SS, or HH:MM:SS")
+    total = 0.0
+    for p in parts:
+        total = total * 60 + int(p)
+    return total
+
+
+# --------------------------------------------------------------------------
+# 1. Acquisition
+# --------------------------------------------------------------------------
+def fetch(url: str, workdir: Path) -> dict:
+    """Pull the video + best available subtitle track via yt-dlp.
+
+    Prefers human-authored subs, falls back to auto-generated. Caps at 1080p —
+    below that, small terminal text turns to mush and the frames become useless.
+    """
+    import yt_dlp
+
+    opts = {
+        # Video only. Nothing here decodes audio — sample_frames runs -vf and
+        # the narration comes from the subtitle track — so pulling +bestaudio
+        # downloaded roughly a quarter of the bytes to throw them away.
+        "format": "bestvideo[height<=1080]/best[height<=1080]",
+        "merge_output_format": "mp4",
+        "outtmpl": str(workdir / "video.%(ext)s"),
+        "writesubtitles": True,
+        "writeautomaticsub": True,      # fallback when no manual track exists
+        "subtitleslangs": ["en", "en-US", "en-orig"],
+        # json3 is YouTube's own format and arrives already de-duplicated. The
+        # rolling repetition is an artefact of VTT, which is built for on-screen
+        # display where lines scroll. Measured across five videos: json3 matches
+        # the VTT-plus-merge output 97.9-100%, and every difference is a residual
+        # duplicate the merge left behind — it drops nothing.
+        "subtitlesformat": "json3/vtt",
+        "quiet": True,
+        "no_warnings": True,
+        # `quiet` alone does not suppress the progress bar; it writes straight
+        # to stdout and garbles this script's own output.
+        "noprogress": True,
+        # A URL copied from the address bar while a video plays inside a playlist
+        # carries &list=. Without this yt-dlp downloads every entry, and every
+        # entry renders to the same outtmpl path — N videos overwrite one file,
+        # and meta["id"] becomes the playlist id.
+        "noplaylist": True,
+    }
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+
+    if info.get("_type") == "playlist":
+        sys.exit("that URL is a playlist — pass a single video URL")
+
+    if not info.get("id"):
+        sys.exit("yt-dlp returned no video id — cannot name the bundle")
+
+    return {
+        "id": info["id"],
+        "title": info.get("title") or info["id"],
+        "channel": info.get("uploader") or "unknown",
+        "duration": info.get("duration") or 0,
+        "url": info.get("webpage_url") or url,
+        # Verbatim, uncut. The description routinely carries what neither the
+        # frames nor the narration do — repo URLs, tool versions, prerequisites —
+        # and truncating it is compression at the wrong layer: nothing in stage 1
+        # summarizes. A 2000-char cap was severing real descriptions mid-link.
+        "description": info.get("description") or "",
+        "tags": (info.get("tags") or [])[:30],
+        "upload_date": info.get("upload_date"),
+        # Chapters are the author's own outline — useful scaffolding for a spec.
+        "chapters": [
+            {"title": c.get("title"), "start": c.get("start_time") or 0}
+            for c in (info.get("chapters") or [])
+        ],
+    }
+
+
+def find_video(staging: Path) -> Path:
+    """Pick the downloaded video out of staging.
+
+    Explicitly extension-matched. `glob("video.*")` also matches `video.en.vtt`,
+    and on at least one filesystem scandir hands back the subtitle track first —
+    which then goes to ffmpeg as if it were a video.
+    """
+    hits = sorted(p for p in staging.glob("video.*") if p.suffix.lower() in VIDEO_EXTS)
+    if not hits:
+        sys.exit(f"no video file in {staging} (looked for {', '.join(VIDEO_EXTS)})")
+    return hits[0]
+
+
+# --------------------------------------------------------------------------
+# 2. Transcript
+# --------------------------------------------------------------------------
+def _is_rolling(texts: list[str], thresh: float = ROLLING_THRESHOLD) -> bool:
+    """Do most cue boundaries repeat a substantial tail of the previous cue?
+
+    Only overlaps of MIN_OVERLAP words or more count: a one-word match at a
+    boundary ("...now" / "now...") is ordinary speech, and on a short track a
+    couple of those are enough to fake a rolling signature. Tracks with too few
+    cues to judge are reported not-rolling, which is the safe answer — the merge
+    stays off and no speech can be deleted.
+    """
+    if len(texts) < ROLLING_MIN_CUES:
+        return False
+    words = [t.split() for t in texts]
+    pairs = [(a, b) for a, b in zip(words, words[1:]) if a and b]
+    if not pairs:
+        return False
+    hits = sum(
+        any(a[-n:] == b[:n]
+            for n in range(min(len(a), len(b)), MIN_OVERLAP - 1, -1))
+        for a, b in pairs
+    )
+    return hits / len(pairs) >= thresh
+
+
+def parse_vtt(path: Path) -> list[Cue]:
+    """Minimal WebVTT parser, tolerant of YouTube's rolling auto-captions.
+
+    Auto-generated VTT carries inline <00:00:04.719><c> word timings and a
+    rolling window: each cue repeats the tail of the previous one and appends a
+    few new words. Comparing whole cues catches only the exact repeats, so the
+    transcript still comes out ~3x duplicated — measured across four real
+    auto-captioned videos, which removed 65-67% of words each.
+
+    Instead each cue is merged against the running tail on a word basis, and only
+    the words not already emitted are kept. Word-based rather than character-
+    based so a tail ending in "back" does not eat the "back" of "backend".
+
+    Applied only when `_is_rolling` says the track actually rolls. Manual tracks
+    pass through unmerged: their cues do not overlap, so any match there is real
+    repeated speech.
+    """
+    time_re = re.compile(r"(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->")
+    tag_re = re.compile(r"<[^>]+>")
+
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+
+    # Pre-pass: read the cue texts plainly so `rolling` is decided from what the
+    # track does, before any merging changes it.
+    plain: list[str] = []
+    _start: float | None = None
+    _buf: list[str] = []
+    for line in raw.splitlines():
+        if time_re.match(line.strip()):
+            if _start is not None:
+                s = re.sub(r"\s+", " ", tag_re.sub("", " ".join(_buf))).strip()
+                if s:
+                    plain.append(s)
+            _start, _buf = 0.0, []
+        elif line.strip() and not line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
+            _buf.append(line.strip())
+    if _start is not None:
+        s = re.sub(r"\s+", " ", tag_re.sub("", " ".join(_buf))).strip()
+        if s:
+            plain.append(s)
+    rolling = _is_rolling(plain)
+
+    cues: list[Cue] = []
+    tail: list[str] = []
+    start: float | None = None
+    buf: list[str] = []
+
+    def flush() -> None:
+        nonlocal tail
+        if start is None:
+            return
+        # Collapse whitespace *after* tag removal — stripping <c> tags leaves
+        # double spaces, which would split one word into two empty-separated ones.
+        text = re.sub(r"\s+", " ", tag_re.sub("", " ".join(buf))).strip()
+        if not text:
+            return
+        words = text.split()
+        if rolling and cues and cues[-1].text == text:
+            return                      # a rolling track's exact restatement
+        new = words
+        if rolling:
+            for n in range(min(len(tail), len(words)), MIN_OVERLAP - 1, -1):
+                if tail[-n:] == words[:n]:
+                    new = words[n:]
+                    break
+        if new:
+            cues.append(Cue(start, " ".join(new)))
+            # Bounded tail: overlap never spans more than a cue or two.
+            tail = (tail + new)[-60:]
+
+    for line in raw.splitlines():
+        m = time_re.match(line.strip())
+        if m:
+            flush()
+            h, mnt, s, ms = map(int, m.groups())
+            start, buf = h * 3600 + mnt * 60 + s + ms / 1000, []
+        elif line.strip() and not line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
+            buf.append(line.strip())
+
+    flush()
+    return cues
+
+
+def parse_json3(path: Path) -> list[Cue]:
+    """Parse YouTube's json3 captions. No de-duplication needed or performed.
+
+    Events alternate between real text and empty spacers; the empties are the
+    only thing to drop.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except json.JSONDecodeError as e:
+        sys.exit(f"malformed caption file {path}: {e}")
+
+    cues: list[Cue] = []
+    for event in data.get("events") or []:
+        text = "".join(
+            seg.get("utf8", "") for seg in (event.get("segs") or [])
+        ).replace("\n", " ").strip()
+        if text:
+            cues.append(Cue((event.get("tStartMs") or 0) / 1000, text))
+    return cues
+
+
+def find_subs(staging: Path) -> tuple[Path, str] | None:
+    """Locate the caption file, preferring json3 over vtt.
+
+    Returns the path and which parser to use. vtt remains the fallback for a
+    source that does not serve json3.
+    """
+    for suffix, kind in ((".json3", "json3"), (".vtt", "vtt")):
+        hits = sorted(staging.glob(f"video*{suffix}"))
+        if not hits:
+            continue
+        for preferred in (f"video.en{suffix}", f"video.en-US{suffix}",
+                          f"video.en-orig{suffix}"):
+            for h in hits:
+                if h.name == preferred:
+                    return h, kind
+        return hits[0], kind
+    return None
+
+
+def find_vtt(staging: Path) -> Path | None:
+    """Prefer a manual track over an auto-generated one.
+
+    yt-dlp names manual subs `video.en.vtt` and auto-generated ones with the
+    same shape, so there is no reliable filename signal. Plain `en` is the most
+    likely manual track; fall back to whatever exists.
+    """
+    hits = sorted(staging.glob("video*.vtt"))
+    if not hits:
+        return None
+    for preferred in ("video.en.vtt", "video.en-US.vtt", "video.en-orig.vtt"):
+        for h in hits:
+            if h.name == preferred:
+                return h
+    return hits[0]
+
+
+# --------------------------------------------------------------------------
+# 3. Frame sampling — the part that actually matters
+# --------------------------------------------------------------------------
+def sample_frames(video: Path, outdir: Path, fps: float,
+                  crop: str | None = None) -> list[Frame]:
+    """Sample at a fixed rate. Frame N lands at (N-1)/fps, exactly.
+
+    The previous implementation used `select='gt(scene,N)'` and recovered each
+    timestamp by parsing pts_time out of ffmpeg's stderr, then zipping that list
+    against the written files. That pairing was the load-bearing assumption of
+    the whole script and had three problems: an ffmpeg version difference or a
+    stray warning line silently shifted every timestamp, scene detection never
+    fires on frame 0 so the opening screen was always missing, and the selection
+    was content-blind — it could not tell a new terminal command from a scroll.
+
+    Fixed-rate sampling makes the timestamp arithmetic instead of parsed. There
+    is nothing left to misalign.
+    """
+    if outdir.exists():
+        # A stale frame from a prior run is a wrong frame, so this directory gets
+        # cleared — which makes it worth proving it is ours before deleting it.
+        strays = [p.name for p in outdir.iterdir() if p.suffix.lower() != ".jpg"]
+        if not outdir.is_dir() or strays:
+            sys.exit(
+                f"refusing to clear {outdir}: not a frames directory "
+                f"(contains {', '.join(sorted(strays)[:5])})"
+            )
+        shutil.rmtree(outdir)
+    outdir.mkdir(parents=True)
+
+    cmd = [
+        "ffmpeg", "-nostdin", "-i", str(video),
+        "-vf", (f"fps={fps}" + (f",crop={crop}" if crop else "")
+                + f",scale={FRAME_WIDTH}:-2:flags=lanczos"),
+        "-q:v", "3",
+        str(outdir / "s_%06d.jpg"),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        sys.exit(f"ffmpeg failed:\n{proc.stderr[-2000:]}")
+
+    files = sorted(outdir.glob("s_*.jpg"))
+    if not files:
+        sys.exit("ffmpeg wrote no frames — is the input actually a video?")
+
+    return [Frame((i) / fps, f) for i, f in enumerate(files)]
+
+
+def dedupe(frames: list[Frame], distance: int) -> list[Frame]:
+    """Drop frames visually identical to the last one kept.
+
+    Compared against the last *kept* frame so a gradual change accumulates
+    against a fixed reference and registers once it crosses the threshold.
+    Comparing against the immediate predecessor would let the reference drift
+    alongside the change and drop the transition entirely.
+
+    Whole-frame phash cannot exclude a moving region: a webcam overlay in the
+    corner of an otherwise static terminal defeats this completely. `--crop` is
+    the escape hatch, and cmd_build warns when retention says it happened.
+    """
+    import imagehash
+    from PIL import Image
+
+    kept: list[Frame] = []
+    last_hash = None
+    for f in frames:
+        with Image.open(f.path) as img:
+            h = imagehash.phash(img, hash_size=PHASH_SIZE)
+        if last_hash is None or (h - last_hash) > distance:
+            kept.append(f)
+            last_hash = h
+    return kept
+
+
+def rename_by_timestamp(frames: list[Frame], outdir: Path) -> list[Frame]:
+    """Rename survivors to their timestamp and delete the rejects.
+
+    Names are the index: `window` finds a span by sorting these, with no
+    manifest to fall out of sync with the directory.
+    """
+    renamed: list[Frame] = []
+    seen: set[str] = set()
+
+    for f in frames:
+        stem = hhmmss(f.ts, sep="-")
+        # Sub-second sampling can round two frames into the same second; a plain
+        # rename would silently overwrite the first one.
+        if stem in seen:
+            n = 2
+            while f"{stem}_{n:02d}" in seen:
+                n += 1
+            stem = f"{stem}_{n:02d}"
+        seen.add(stem)
+        dest = outdir / f"{stem}.jpg"
+        f.path.rename(dest)
+        renamed.append(Frame(f.ts, dest))
+
+    for junk in outdir.glob("s_*.jpg"):
+        junk.unlink()
+
+    return renamed
+
+
+# --------------------------------------------------------------------------
+# 4. Bundle assembly
+# --------------------------------------------------------------------------
+def useful_links(description: str) -> list[str]:
+    """URLs from the description, minus the affiliate and social boilerplate."""
+    seen: list[str] = []
+    for url in URL_RE.findall(description or ""):
+        url = url.rstrip(".,;:)")
+        low = url.lower()
+        if any(n in low for n in LINK_NOISE) or url in seen:
+            continue
+        seen.append(url)
+    return seen
+
+
+def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) -> Path:
+    """Emit BUNDLE.md as a *navigation map*, not the payload.
+
+    An earlier version inlined every frame as a markdown image. Two problems:
+    at 1 fps that file is thousands of images long, and `![](frames/x.jpg)` in a
+    file Claude reads is inert text — it renders nowhere and loads nothing. The
+    bundle now carries meta, chapters, the full transcript, and an index of what
+    frames exist; the frames themselves are read on demand via `window`.
+    """
+    est = len(frames) * TOKENS_PER_FRAME
+    lines = [
+        f"# {meta['title']}",
+        "",
+        f"**Channel:** {meta['channel']}  ",
+        f"**Duration:** {hhmmss(meta['duration'])}  ",
+        f"**Source:** {meta['url']}  ",
+        f"**Frames:** {len(frames)} (~{est // 1000}k tokens if read whole)",
+        "",
+        "> Navigation map. The frames are the payload and are NOT inlined here —",
+        "> reading this file alone is not watching the video.",
+        ">",
+        "> Read a span with the screenscribe skill, which resolves the script:",
+        f"> `window {meta['id']} <START> <END>`",
+        "",
+    ]
+
+    links = useful_links(meta.get("description", ""))
+    if links:
+        lines += ["## Links from the description", ""]
+        lines += [f"- {u}" for u in links[:25]]
+        lines += [""]
+
+    if meta.get("description", "").strip():
+        lines += ["## Description", "",
+                  "> Author-written. Often carries repo URLs, tool versions and",
+                  "> prerequisites that appear nowhere on screen.", ""]
+        lines += ["```", meta["description"].strip(), "```", ""]
+
+    if meta["chapters"]:
+        lines += ["## Chapters", ""]
+        lines += [
+            f"- `{hhmmss(c['start'])}` {c['title']}" for c in meta["chapters"]
+        ]
+        lines += [""]
+
+    lines += [
+        "## Frame index",
+        "",
+        f"`frames/` holds {len(frames)} frames named `HH-MM-SS.jpg`. Coverage:",
+        "",
+    ]
+    # Per-minute density tells you where the video is busy without listing
+    # thousands of filenames.
+    buckets: dict[int, int] = {}
+    for f in frames:
+        buckets[int(f.ts // 60)] = buckets.get(int(f.ts // 60), 0) + 1
+    if buckets:
+        lines += ["| minute | frames |", "| - | - |"]
+        lines += [f"| `{m:02d}:00` | {buckets[m]} |" for m in sorted(buckets)]
+        lines += [""]
+
+    lines += ["## Transcript", ""]
+    if cues:
+        lines += [f"`{hhmmss(c.start)}` {c.text}" for c in cues]
+    else:
+        lines += ["_No subtitle track was available for this video._"]
+    lines += [""]
+
+    path = out / "BUNDLE.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------
+# 5. Window — read a span back at a size that fits
+# --------------------------------------------------------------------------
+def emit_window(bundle: Path, start: float, end: float, force: bool = False) -> None:
+    """Print an interleaved slice: what was on screen and what was said.
+
+    Frame paths are printed bare and absolute, one per line, precisely so they
+    can be fed straight to Read. Markdown image syntax would look right and load
+    nothing.
+    """
+    meta_path = bundle / "meta.json"
+    if not meta_path.is_file():
+        sys.exit(f"not a bundle: {meta_path} missing")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
+
+    frames = []
+    for p in sorted((bundle / "frames").glob("*.jpg")):
+        parts = p.stem.split("_")[0].split("-")
+        if len(parts) != 3 or not all(x.isdigit() for x in parts):
+            continue
+        ts = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        if start <= ts <= end:
+            frames.append(Frame(ts, p.resolve()))
+
+    cues = [
+        Cue(c["start"], c["text"])
+        for c in meta.get("transcript", [])
+        if start <= c["start"] <= end
+    ]
+
+    # Count the text too. A heavily-deduped long video is few frames and a full
+    # transcript, so a frames-only estimate let ~123k tokens of paths and cue
+    # lines walk past a cap whose whole job is bounding context.
+    frame_tokens = len(frames) * TOKENS_PER_FRAME
+    text_chars = (sum(len(str(f.path)) + 20 for f in frames)
+                  + sum(len(c.text) + 20 for c in cues))
+    text_tokens = text_chars // 4
+    est = frame_tokens + text_tokens
+
+    # Refuse rather than warn. Printing the advice and then the payload delivers
+    # it to a reader that has already paid for it.
+    if est > WINDOW_TOKEN_CAP and not force:
+        sys.exit(
+            f"~{est // 1000}k tokens of frames for {hhmmss(start)}-{hhmmss(end)} "
+            f"({len(frames)} frames). Narrow the span, or pass --force."
+        )
+
+    print(f"# {meta.get('title', bundle.name)} — {hhmmss(start)} to {hhmmss(end)}")
+    print()
+    print(f"{len(frames)} frames (~{frame_tokens // 1000}k tokens) + "
+          f"{len(cues)} cues (~{text_tokens // 1000}k tokens).")
+    print()
+    print("Read every path under FRAME. The narration between them is what was")
+    print("being said while that was on screen.")
+    print()
+
+    events = [(f.ts, 0, str(f.path)) for f in frames]
+    events += [(c.start, 1, c.text) for c in cues]
+    events.sort(key=lambda e: (e[0], e[1]))   # frame first: screen state, then talk
+
+    for ts, kind, payload in events:
+        if kind == 0:
+            print(f"FRAME {hhmmss(ts)}  {payload}")
+        else:
+            print(f"      {hhmmss(ts)}  {payload}")
+
+
+# --------------------------------------------------------------------------
+# 6. Artifact — a shareable page of one span
+# --------------------------------------------------------------------------
+def frames_in_span(bundle: Path, start: float, end: float) -> list[Frame]:
+    found = []
+    for p in sorted((bundle / "frames").glob("*.jpg")):
+        parts = p.stem.split("_")[0].split("-")
+        if len(parts) != 3 or not all(x.isdigit() for x in parts):
+            continue
+        ts = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        if start <= ts <= end:
+            found.append(Frame(float(ts), p.resolve()))
+    return found
+
+
+def pick_for_display(frames: list[Frame], distance: int) -> list[Frame]:
+    """Second, harsher dedupe pass, for the page rather than for reading."""
+    import imagehash
+    from PIL import Image
+
+    kept: list[Frame] = []
+    last = None
+    for f in frames:
+        with Image.open(f.path) as img:
+            h = imagehash.phash(img, hash_size=PHASH_SIZE)
+        if last is None or (h - last) > distance:
+            kept.append(f)
+            last = h
+    return kept
+
+
+def encode_frame(path: Path, width: int, quality: int) -> str:
+    """Re-encode one frame small enough to embed, as a data: URI."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(path) as img:
+        img = img.convert("RGB")
+        if img.width > width:
+            h = round(img.height * width / img.width)
+            img = img.resize((width, h), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=quality, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def build_artifact(bundle: Path, start: float, end: float, out: Path,
+                   template: Path, distance: int) -> Path:
+    if not template.is_file():
+        sys.exit(f"artifact template not found: {template}")
+    meta_path = bundle / "meta.json"
+    if not meta_path.is_file():
+        sys.exit(f"not a bundle: {meta_path} missing")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
+
+    frames = pick_for_display(frames_in_span(bundle, start, end), distance)
+    if not frames:
+        sys.exit(f"no frames between {hhmmss(start)} and {hhmmss(end)}")
+
+    cues = [c for c in meta.get("transcript", []) if start - 8 <= c["start"] <= end + 8]
+    rows = []
+    for i, f in enumerate(frames):
+        nxt = frames[i + 1].ts if i + 1 < len(frames) else end + 8
+        said = " ".join(c["text"] for c in cues if f.ts <= c["start"] < nxt).strip()
+        rows.append({"t": f.ts, "label": hhmmss(f.ts),
+                     "said": said,
+                     "img": encode_frame(f.path, ARTIFACT_WIDTH, ARTIFACT_QUALITY)})
+
+    payload = {
+        "title": meta.get("title", bundle.name),
+        "channel": meta.get("channel", ""),
+        "url": meta.get("url", ""),
+        "fps": meta.get("fps", FPS),
+        "spanLabel": f"{hhmmss(start)}\u2013{hhmmss(end)}",
+        "chapters": [{"t": c["start"], "label": hhmmss(c["start"]), "title": c["title"]}
+                     for c in meta.get("chapters", [])
+                     if start - 30 <= c["start"] <= end],
+        "description": meta.get("description", ""),
+        "links": useful_links(meta.get("description", ""))[:25],
+        "totalFrames": meta.get("frame_count", len(frames)),
+        "cueCount": len(meta.get("transcript", [])),
+        "frames": rows,
+    }
+
+    html = template.read_text(encoding="utf-8")
+    html = html.replace("__TITLE__", payload["title"])
+    html = html.replace(
+        "var D = window.__SCRIBE__;",
+        "var D = " + json.dumps(payload).replace("</", "<\\/") + ";",
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html, encoding="utf-8")
+
+    size = out.stat().st_size
+    print(f"[done] {out}")
+    print(f"       {len(frames)} screens, {size / 1048576:.2f} MB")
+    if size > ARTIFACT_SOFT_LIMIT:
+        print(f"       ! over {ARTIFACT_SOFT_LIMIT // 1048576} MB — narrow the span "
+              f"or raise --display-distance before publishing")
+    return out
+
+
+def cmd_artifact(args: argparse.Namespace) -> None:
+    start, end = parse_span(args.start), parse_span(args.end)
+    if end <= start:
+        sys.exit(f"end ({args.end}) must be after start ({args.start})")
+    bundle = resolve_bundle(args.bundle)
+    template = args.template or (Path(__file__).resolve().parent.parent
+                                 / "assets" / "artifact-template.html")
+    out = args.out or Path(f"{bundle.name}-{int(start)}-{int(end)}.html")
+    build_artifact(bundle, start, end, out, template, args.display_distance)
+
+
+# --------------------------------------------------------------------------
+def cmd_build(args: argparse.Namespace) -> None:
+    # Arguments first: the checks are free, deterministic, and independent of the
+    # environment, so a typo gets named as a typo rather than being masked by
+    # whatever happens to be missing from the machine.
+    if not 0 < args.fps < 1000:      # the range form also rejects nan and inf
+        sys.exit("--fps must be between 0 and 1000")
+    if args.crop and not re.fullmatch(r"\d+:\d+:\d+:\d+", args.crop):
+        sys.exit(f"--crop must be W:H:X:Y in pixels, got {args.crop!r}")
+
+    if not shutil.which("ffmpeg"):
+        sys.exit("ffmpeg not found on PATH")
+    # Fail before the download, not after it. yt_dlp imports in fetch() and
+    # imagehash/PIL only in dedupe(), so a missing Pillow used to surface as an
+    # unhandled ImportError after the full download and the whole sampling pass.
+    try:
+        import imagehash  # noqa: F401
+        import PIL        # noqa: F401
+        import yt_dlp     # noqa: F401
+    except ImportError as e:
+        sys.exit(
+            f"missing dependency: {e.name}\n"
+            f"  python3 -m venv ~/.screenscribe/venv\n"
+            f"  ~/.screenscribe/venv/bin/pip install -q yt-dlp imagehash pillow"
+        )
+
+    out = args.out if args.out is not None else bundles_root()
+
+    # Cleared, not reused. A leftover video.mp4 from a prior --keep-video run
+    # makes yt-dlp skip the download, and the bundle silently describes the
+    # previous video.
+    staging = out / "_staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    print("-> fetching video + subtitles")
+    meta = fetch(args.url, staging)
+
+    dest = safe_dest(out, meta["id"])
+    dest.mkdir(parents=True, exist_ok=True)
+
+    found = find_subs(staging)
+    if found:
+        subs, kind = found
+        cues = parse_json3(subs) if kind == "json3" else parse_vtt(subs)
+        print(f"   {len(cues)} transcript cues ({kind})")
+    else:
+        cues = []
+        print("   ! no subtitles found")
+
+    video = find_video(staging)
+
+    print(f"-> sampling at {args.fps} fps")
+    # Sample into a sibling and swap only on success. Clearing dest/frames up
+    # front destroyed the previous bundle's frames whenever this run then failed,
+    # leaving BUNDLE.md and meta.json describing frames that no longer existed.
+    work = dest / "frames.new"
+    try:
+        raw = sample_frames(video, work, args.fps, args.crop)
+        kept = dedupe(raw, args.phash_distance)
+        frames = rename_by_timestamp(kept, work)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)   # no half-built dir survives a failure
+        raise
+    # Move the old directory aside rather than deleting it first, so there is
+    # never an instant where the bundle has no frames directory.
+    live, old = dest / "frames", dest / "frames.old"
+    shutil.rmtree(old, ignore_errors=True)
+    if live.exists():
+        live.rename(old)
+    work.rename(live)
+    shutil.rmtree(old, ignore_errors=True)
+    frames = [Frame(f.ts, dest / "frames" / f.path.name) for f in frames]
+    print(f"   {len(raw)} sampled -> {len(frames)} kept after dedupe")
+
+    # Whole-frame phash cannot exclude a moving region, so a webcam overlay on an
+    # otherwise static screencast keeps every frame and dedupe silently no-ops.
+    ratio = len(frames) / max(len(raw), 1)
+    if ratio > 0.9 and len(raw) > 60:
+        print(f"   ! dedupe kept {ratio:.0%} — a webcam overlay or animated "
+              f"background defeats whole-frame hashing.")
+        print(f"     re-run with --crop W:H:X:Y around the content, or a lower --fps.")
+
+    # Transcript rides in meta.json so `window` needs no second parse.
+    # BUNDLE.md carries its own copy for reading; both come from `cues` in this
+    # same run, so they cannot drift.
+    meta["transcript"] = [{"start": c.start, "text": c.text} for c in cues]
+    meta["fps"] = args.fps
+    meta["frame_count"] = len(frames)
+    (dest / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    bundle = build_bundle(meta, cues, frames, dest)
+
+    if not args.keep_video:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    est = len(frames) * TOKENS_PER_FRAME
+    print(f"\n[done] {bundle}")
+    print(f"       {len(frames)} frames (~{est // 1000}k tokens whole) in {dest / 'frames'}")
+    print(f"       watch a span: window {meta['id']} 00:00 05:00")
+
+
+def cmd_window(args: argparse.Namespace) -> None:
+    start, end = parse_span(args.start), parse_span(args.end)
+    if end <= start:
+        sys.exit(f"end ({args.end}) must be after start ({args.start})")
+    emit_window(resolve_bundle(args.bundle), start, end, args.force)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="tutorial video -> spec-ready bundle")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    b = sub.add_parser("build", help="download a video and build a bundle")
+    b.add_argument("url")
+    b.add_argument("-o", "--out", default=None, type=Path,
+                   help=f"bundle root (default: ${BUNDLES_ENV}, else {DEFAULT_BUNDLES})")
+    b.add_argument("--fps", type=float, default=FPS,
+                   help=f"frames sampled per second (default {FPS})")
+    b.add_argument("--phash-distance", type=int, default=PHASH_DISTANCE,
+                   help=f"lower keeps more near-identical frames, 0-{PHASH_SIZE**2} "
+                        f"(default {PHASH_DISTANCE})")
+    b.add_argument("--crop", default=None,
+                   help="ffmpeg crop W:H:X:Y applied before hashing, to exclude "
+                        "a webcam overlay or animated background")
+    b.add_argument("--keep-video", action="store_true")
+    b.set_defaults(func=cmd_build)
+
+    w = sub.add_parser("window", help="print a span of a bundle for reading")
+    w.add_argument("bundle", type=Path,
+                   help="bundle directory, or a bare video id under the bundle root")
+    w.add_argument("start", help="SS, MM:SS, or HH:MM:SS")
+    w.add_argument("end", help="SS, MM:SS, or HH:MM:SS")
+    w.add_argument("--force", action="store_true",
+                   help=f"emit even above ~{WINDOW_TOKEN_CAP // 1000}k tokens of frames")
+    w.set_defaults(func=cmd_window)
+
+    a = sub.add_parser("artifact", help="build a shareable HTML page for a span")
+    a.add_argument("bundle", type=Path,
+                   help="bundle directory, or a bare video id under the bundle root")
+    a.add_argument("start", help="SS, MM:SS, or HH:MM:SS")
+    a.add_argument("end", help="SS, MM:SS, or HH:MM:SS")
+    a.add_argument("-o", "--out", type=Path, default=None, help="output .html path")
+    a.add_argument("--display-distance", type=int, default=DISPLAY_DISTANCE,
+                   help=f"cull harder than the build pass (default {DISPLAY_DISTANCE})")
+    a.add_argument("--template", type=Path, default=None)
+    a.set_defaults(func=cmd_artifact)
+
+    args = ap.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

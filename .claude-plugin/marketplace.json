@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
-    "version": "1.20.1"
+    "version": "1.21.0"
   },
   "plugins": [
     {
@@ -34,6 +34,13 @@
       "name": "session-analyzer",
       "description": "Analyze and extract conversations from Claude Code session JSONL files — transcripts, token stats, tool usage, and session discovery",
       "source": "./plugins/session-analyzer",
+      "category": "developer-tools",
+      "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
+    },
+    {
+      "name": "screenscribe",
+      "description": "Watch a video and write down what was actually on screen — dense frame sampling with windowed read-back so Claude reads the pixels transcripts omit, then whatever artifact the work needs: spec, review, summary, or walkthrough",
+      "source": "./plugins/screenscribe",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
     },

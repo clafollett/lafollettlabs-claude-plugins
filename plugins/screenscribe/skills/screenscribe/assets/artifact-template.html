@@ -1,0 +1,295 @@
+<title>__TITLE__</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+:root{
+  --ink:#16181d; --body:#2c313a; --muted:#6b7280;
+  --paper:#eef0f2; --surface:#ffffff; --line:#d6dade;
+  --accent:#0f766e; --accent-soft:#d7ece9;
+  --pick:#2f855a; --squash:#b7791f; --drop:#c53030;
+  --shadow:0 1px 2px rgba(22,24,29,.06),0 8px 24px -12px rgba(22,24,29,.28);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ink:#eceef1; --body:#c2c8d0; --muted:#8b93a1;
+  --paper:#101218; --surface:#191c23; --line:#2a2f39;
+  --accent:#2dd4bf; --accent-soft:#12312e;
+  --pick:#68d391; --squash:#e0b155; --drop:#f0837c;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 24px -12px rgba(0,0,0,.7);
+}}
+:root[data-theme="dark"]{
+  --ink:#eceef1; --body:#c2c8d0; --muted:#8b93a1;
+  --paper:#101218; --surface:#191c23; --line:#2a2f39;
+  --accent:#2dd4bf; --accent-soft:#12312e;
+  --pick:#68d391; --squash:#e0b155; --drop:#f0837c;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 24px -12px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--body);
+  font:400 16px/1.6 "IBM Plex Sans",system-ui,sans-serif;margin:0}
+h1,h2{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  color:var(--ink);text-wrap:balance;margin:0}
+a{color:var(--accent)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+header{border-bottom:1px solid var(--line);background:var(--surface)}
+.head{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-end;
+  justify-content:space-between;padding:40px 0 28px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+h1{font-size:clamp(30px,4.4vw,44px);line-height:1.08;letter-spacing:-.015em}
+.sub{color:var(--muted);font-size:14px;margin-top:10px}
+.facts{display:flex;gap:26px;flex-wrap:wrap}
+.fact{display:flex;flex-direction:column;gap:2px}
+.fact .n{font-family:"IBM Plex Mono",monospace;font-size:21px;font-weight:600;color:var(--ink)}
+.fact .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+.bar{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar-in{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0}
+.chip{font-family:"IBM Plex Mono",monospace;font-size:12px;padding:5px 11px;
+  border:1px solid var(--line);border-radius:999px;background:transparent;
+  color:var(--body);cursor:pointer;display:inline-flex;gap:7px;align-items:center}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+.chip:focus-visible,.disc:focus-visible,.toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dot{width:7px;height:7px;border-radius:2px;flex:none}
+.spacer{flex:1 1 auto}
+.toggle{font-family:"IBM Plex Mono",monospace;font-size:12px;padding:5px 11px;
+  border:1px solid var(--line);border-radius:6px;background:transparent;
+  color:var(--muted);cursor:pointer}
+.toggle[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+
+.lede{padding:26px 0 6px;max-width:64ch}
+.lede strong{color:var(--ink)}
+.desc{border-top:1px solid var(--line);padding:20px 0 4px;margin-top:20px}
+.desc h2{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-family:"IBM Plex Mono",monospace;font-weight:500;margin-bottom:10px}
+.desc pre{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.65;
+  white-space:pre-wrap;word-break:break-word;color:var(--body);margin:0;
+  background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px}
+.desc .more{margin-top:9px;font-family:"IBM Plex Mono",monospace;font-size:12px;
+  padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:transparent;
+  color:var(--muted);cursor:pointer}
+.desc .more:hover{border-color:var(--accent);color:var(--accent)}
+.desc .more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.links{display:flex;flex-direction:column;gap:5px;padding:0;margin:0 0 22px;list-style:none}
+.links a{font-family:"IBM Plex Mono",monospace;font-size:12.5px;word-break:break-all}
+
+main{padding-bottom:80px}
+.chap{display:flex;gap:12px;align-items:baseline;padding:44px 0 14px;scroll-margin-top:64px}
+.chap h2{font-size:20px;letter-spacing:-.01em}
+.chap .t{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted)}
+.chap .rule{flex:1;height:1px;background:var(--line);align-self:center}
+
+.row{display:grid;grid-template-columns:74px 1fr;gap:20px;padding:14px 0}
+.stamp{position:relative;padding-top:2px}
+.stamp::after{content:"";position:absolute;left:-13px;top:9px;bottom:-22px;width:1px;background:var(--line)}
+.row:last-child .stamp::after{display:none}
+.disc{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+  background:transparent;border:1px solid transparent;border-radius:5px;
+  padding:2px 6px 2px 4px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;
+  font-variant-numeric:tabular-nums}
+.disc:hover{border-color:var(--line);color:var(--accent)}
+.caret{display:inline-block;width:8px;height:8px;border-right:1.6px solid currentColor;
+  border-bottom:1.6px solid currentColor;transform:rotate(45deg);
+  transition:transform .15s ease;flex:none;margin-bottom:2px}
+.disc[aria-expanded="false"] .caret{transform:rotate(-45deg)}
+figure{margin:0;display:flex;flex-direction:column;gap:9px}
+.shot{display:block;width:100%;height:auto;border-radius:6px;border:1px solid var(--line);
+  box-shadow:var(--shadow);cursor:zoom-in;background:var(--surface)}
+figcaption{color:var(--muted);font-size:14.5px;max-width:64ch}
+figcaption::before{content:"heard  ";font-family:"IBM Plex Mono",monospace;font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-right:6px}
+.silent figcaption::before{content:"silent here  ";color:var(--muted)}
+.silent figcaption{font-style:italic;opacity:.7}
+.row[data-open="false"] .shot{display:none}
+.row[data-open="false"]{padding:5px 0}
+
+dialog{border:none;padding:0;background:transparent;max-width:96vw;max-height:96vh}
+dialog::backdrop{background:rgba(10,12,16,.86)}
+dialog img{max-width:96vw;max-height:88vh;border-radius:8px;display:block}
+dialog .cap{font-family:"IBM Plex Mono",monospace;color:#e6e8ec;font-size:12px;padding:10px 2px}
+footer{border-top:1px solid var(--line);background:var(--surface);padding:28px 0;
+  color:var(--muted);font-size:13px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:620px){.row{grid-template-columns:56px 1fr;gap:14px}}
+</style>
+
+<header><div class="wrap"><div class="head">
+  <div>
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="title"></h1>
+    <div class="sub"><span id="channel"></span> &middot; <a id="src" href="#">watch the source</a></div>
+  </div>
+  <div class="facts" id="facts"></div>
+</div></div></header>
+
+<div class="bar"><div class="wrap"><div class="bar-in" id="chips">
+  <span class="spacer"></span>
+  <button class="toggle" id="allToggle" aria-pressed="false">
+    <span id="toggleLabel">hide every screen</span> <span class="mono" id="openCount"></span>
+  </button>
+</div></div></div>
+
+<div class="wrap">
+  <p class="lede">Each row is a second of screen paired with the narration spoken over it.
+  Collapse one screen with its timestamp, or <strong>hide every screen</strong> to see what
+  the transcript alone would have given you.</p>
+  <ul class="links" id="links"></ul>
+  <div class="desc" id="descBox" hidden>
+    <h2>Author's description</h2>
+    <pre id="desc"></pre>
+    <button class="more" id="descMore" aria-expanded="false" aria-controls="desc" hidden></button>
+  </div>
+</div>
+
+<main><div class="wrap" id="timeline"></div></main>
+
+<dialog id="lb"><img id="lbImg" alt=""><div class="cap mono" id="lbCap"></div></dialog>
+
+<footer><div class="wrap">Scribed by screenscribe from
+  <a id="srcFoot" href="#">the source video</a> &mdash; frames sampled at
+  <span id="fps" class="mono"></span>&nbsp;fps, visually identical ones dropped, each kept
+  frame paired with what was said over it.</div></footer>
+
+<script>
+var D = window.__SCRIBE__;
+var CHAP_COLORS = ["var(--accent)","var(--squash)","var(--drop)","var(--pick)"];
+
+function el(tag, cls, txt){
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (txt != null) n.textContent = txt;
+  return n;
+}
+
+document.getElementById("eyebrow").textContent =
+  "screenscribe \u00b7 watched span " + D.spanLabel;
+document.getElementById("title").textContent = D.title;
+document.getElementById("channel").textContent = D.channel;
+document.getElementById("src").href = D.url;
+document.getElementById("srcFoot").href = D.url;
+document.getElementById("fps").textContent = D.fps;
+
+var facts = document.getElementById("facts");
+[[D.frames.length,"screens shown"],[D.totalFrames,"frames in bundle"],
+ [D.cueCount,"transcript cues"]].forEach(function(f){
+  var d = el("div","fact");
+  d.appendChild(el("span","n",String(f[0])));
+  d.appendChild(el("span","l",f[1]));
+  facts.appendChild(d);
+});
+
+var links = document.getElementById("links");
+(D.links || []).forEach(function(u){
+  var li = el("li"), a = el("a", null, u);
+  a.href = u; a.rel = "noopener noreferrer"; li.appendChild(a); links.appendChild(li);
+});
+var DESC_PREVIEW = 280;
+if (D.description) {
+  var descEl = document.getElementById("desc"),
+      moreEl = document.getElementById("descMore"),
+      full = D.description.trim(), expanded = false;
+  // Clip at a word boundary so the preview never severs a URL mid-token. The
+  // bundle stores the description verbatim; only this view is abbreviated.
+  var cut = full.slice(0, DESC_PREVIEW);
+  var brk = cut.lastIndexOf(" ");
+  var preview = (brk > DESC_PREVIEW * 0.6 ? cut.slice(0, brk) : cut).trimEnd() + "\u2026";
+  var clipped = full.length > DESC_PREVIEW;
+
+  function renderDesc(){
+    descEl.textContent = (!clipped || expanded) ? full : preview;
+    moreEl.setAttribute("aria-expanded", String(expanded));
+    moreEl.textContent = expanded
+      ? "show less"
+      : "show all " + full.length.toLocaleString() + " characters";
+  }
+  moreEl.hidden = !clipped;
+  moreEl.addEventListener("click", function(){ expanded = !expanded; renderDesc(); });
+  renderDesc();
+  document.getElementById("descBox").hidden = false;
+}
+
+var chips = document.getElementById("chips");
+(D.chapters || []).forEach(function(c, i){
+  var b = el("button","chip");
+  var dot = el("span","dot");
+  dot.style.background = CHAP_COLORS[i % CHAP_COLORS.length];
+  b.appendChild(dot); b.appendChild(document.createTextNode(c.title));
+  b.addEventListener("click", function(){
+    var t = document.getElementById("c" + c.t);
+    if (t) t.scrollIntoView({behavior:"smooth", block:"start"});
+  });
+  chips.insertBefore(b, chips.querySelector(".spacer"));
+});
+
+var timeline = document.getElementById("timeline");
+var rows = [];
+D.frames.forEach(function(f, i){
+  (D.chapters || []).forEach(function(c, ci){
+    if (c.t <= f.t && (i === 0 || D.frames[i-1].t < c.t)) {
+      var h = el("div","chap"); h.id = "c" + c.t;
+      var dot = el("span","dot");
+      dot.style.background = CHAP_COLORS[ci % CHAP_COLORS.length];
+      dot.style.marginTop = "9px";
+      h.appendChild(dot);
+      h.appendChild(el("h2", null, c.title));
+      h.appendChild(el("span","t mono", c.label));
+      h.appendChild(el("span","rule"));
+      timeline.appendChild(h);
+    }
+  });
+  var row = el("div","row"); row.dataset.open = "true";
+  var stamp = el("div","stamp");
+  var disc = el("button","disc");
+  disc.setAttribute("aria-expanded","true");
+  disc.appendChild(el("span","caret"));
+  disc.appendChild(document.createTextNode(f.label));
+  stamp.appendChild(disc); row.appendChild(stamp);
+
+  var fig = el("figure"); if (!f.said) fig.className = "silent";
+  var img = el("img","shot");
+  img.loading = "lazy"; img.src = f.img;
+  img.alt = "Screen at " + f.label; img.dataset.t = f.label;
+  fig.appendChild(img);
+  fig.appendChild(el("figcaption", null, f.said || "nothing said over this screen"));
+  row.appendChild(fig);
+  timeline.appendChild(row);
+  rows.push(row);
+
+  disc.addEventListener("click", function(){
+    setRow(row, row.dataset.open !== "true"); sync();
+  });
+  img.addEventListener("click", function(){
+    lbImg.src = img.src; lbImg.alt = img.alt; lbCap.textContent = f.label;
+    if (lb.showModal) lb.showModal();
+  });
+});
+
+function setRow(row, open){
+  row.dataset.open = String(open);
+  var b = row.querySelector(".disc");
+  b.setAttribute("aria-expanded", String(open));
+  b.setAttribute("aria-label", (open ? "Collapse" : "Expand") +
+    " the screen at " + b.textContent.trim());
+}
+var allToggle = document.getElementById("allToggle"),
+    toggleLabel = document.getElementById("toggleLabel"),
+    openCount = document.getElementById("openCount");
+function sync(){
+  var open = rows.filter(function(r){ return r.dataset.open === "true"; }).length;
+  var allHidden = open === 0;
+  allToggle.setAttribute("aria-pressed", String(allHidden));
+  toggleLabel.textContent = allHidden ? "show every screen" : "hide every screen";
+  openCount.textContent = open + "/" + rows.length;
+}
+allToggle.addEventListener("click", function(){
+  var open = rows.filter(function(r){ return r.dataset.open === "true"; }).length;
+  var next = open === 0;
+  rows.forEach(function(r){ setRow(r, next); });
+  sync();
+});
+var lb = document.getElementById("lb"),
+    lbImg = document.getElementById("lbImg"),
+    lbCap = document.getElementById("lbCap");
+lb.addEventListener("click", function(){ lb.close(); });
+sync();
+</script>

@@ -10,6 +10,7 @@ Claude Code plugin marketplace for [LaFollett Labs LLC](https://lafollettlabs.co
 | [context-handoff](./plugins/context-handoff/) | Session state handoff and resume with prior-session deduplication | [Commands](./plugins/context-handoff/commands/) |
 | [issue-manager](./plugins/issue-manager/) | GitHub Issue management with intent-over-implementation templates | [Skill](./plugins/issue-manager/skills/issue-manager/SKILL.md) |
 | [session-analyzer](./plugins/session-analyzer/) | Analyze and extract conversations from Claude Code session JSONL files | [Skill](./plugins/session-analyzer/skills/session-analyzer/SKILL.md) |
+| [screenscribe](./plugins/screenscribe/) | Watch a video and write down what was on screen — specs, reviews, summaries, walkthroughs | [Skill](./plugins/screenscribe/skills/screenscribe/SKILL.md) |
 | [ux-designer](./plugins/ux-designer/) | UX design harness with structured discovery, visual iteration, and parallel exploration | [Skill](./plugins/ux-designer/skills/ux-designer/SKILL.md) |
 
 **code-reviewer** — PE-powered code reviews
@@ -54,6 +55,18 @@ Analyze and extract conversations from Claude Code session JSONL files. Python 3
 - **`analyze`** — Session statistics: duration, token usage, cache hit rate, tool breakdown, files modified
 - Streaming parser handles arbitrarily large session files
 - Markdown or JSON output formats
+
+### screenscribe
+
+Automates the watching and the scribing. Transcripts are the wrong artifact for a screencast — the payload is on screen (terminal commands, file trees, IDE state, diagrams) and the narration around it is filler.
+
+- **Build** — samples at 1 fps into `~/.screenscribe/bundles`, drops visually-identical frames, names the survivors by timestamp
+- **Watch** — a span's frames plus the narration spoken over them; Claude reads the frames as images
+- **Scribe** — write down what was on screen, verbatim where it matters, anchored to timestamps
+- **Emit** — whatever you asked for: a spec, a review of the video, a summary, or the commands actually run
+- Every artifact cites `Watch:` spans, so a later session re-opens the source instead of trusting a summary
+- Works without a video — skip to emit to author a spec from a plain idea
+- Requires `ffmpeg` plus `yt-dlp`, `imagehash`, `pillow` — checked before anything downloads
 
 ### ux-designer
 

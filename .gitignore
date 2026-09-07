@@ -13,10 +13,30 @@ desktop.ini
 # Node
 node_modules/
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
 # Temporary files
 *.tmp
 *.bak
 *.log
+
+# screenscribe bundles — downloaded video frames, never committed
+bundles/
+
+# Playwright MCP scratch output (screenshots, snapshots, console logs)
+.playwright-mcp/
 
 # Claude
 .claude/scheduled_tasks.lock
