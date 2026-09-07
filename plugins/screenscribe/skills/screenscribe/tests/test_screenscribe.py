@@ -1746,7 +1746,7 @@ class LibraryCase(TempDirCase):
 
     def prune(self, **kw):
         opts = dict(root=self.tmp, id=[], older_than=None, keep=None,
-                    over=None, purge=False, yes=False)
+                    over=None, frames_only=False, yes=False)
         opts.update(kw)
         return self.invoke(sc.cmd_prune, **opts)
 
@@ -1928,7 +1928,8 @@ class TestPruneSelection(LibraryCase):
         self.bundle("NEW", frames=4, used=3_000_000)
 
     def select(self, **kw):
-        opts = dict(id=[], older_than=None, keep=None, over=None, purge=False)
+        opts = dict(id=[], older_than=None, keep=None, over=None,
+                    frames_only=False)
         opts.update(kw)
         return [e.id for e in sc.prune_targets(sc.library(self.tmp),
                                                argparse.Namespace(**opts))]
@@ -1959,20 +1960,20 @@ class TestPruneSelection(LibraryCase):
         with self.assertRaises(SystemExit):
             self.select(id=["NOPE"])
 
-    def test_an_already_pruned_bundle_is_never_picked_again(self) -> None:
+    def test_frames_only_skips_a_bundle_already_stripped(self) -> None:
         """It has nothing left to give: a row claiming bytes that no eviction
-        produced, and a `prune` that never settles on "nothing to prune"."""
+        produced, and a prune that never settles on "nothing to prune"."""
         stripped = self.bundle("GONE", frames=2, used=500_000)
         shutil.rmtree(stripped / "frames")
         for kw in ({"over": "1"}, {"keep": 0}, {"older_than": 1},
                    {"id": ["GONE"]}):
-            self.assertNotIn("GONE", self.select(**kw), kw)
+            self.assertNotIn("GONE", self.select(frames_only=True, **kw), kw)
 
-    def test_purge_still_takes_a_stripped_bundle(self) -> None:
-        """Its frames are gone, but the scribe is still on disk."""
+    def test_a_full_prune_still_takes_a_stripped_bundle(self) -> None:
+        """Its frames are gone, but the scribe and the directory are not."""
         stripped = self.bundle("GONE", frames=2, used=500_000)
         shutil.rmtree(stripped / "frames")
-        self.assertIn("GONE", self.select(id=["GONE"], purge=True))
+        self.assertIn("GONE", self.select(id=["GONE"]))
 
 
 class TestPruneExecution(LibraryCase):
@@ -1982,9 +1983,15 @@ class TestPruneExecution(LibraryCase):
         self.assertIn("dry run", out)
         self.assertTrue((d / "frames").is_dir())
 
-    def test_yes_evicts_frames_and_keeps_the_scribe(self) -> None:
+    def test_the_default_removes_the_whole_bundle(self) -> None:
+        """"Prune a scribed video" means the video leaves the library."""
         d = self.bundle("AAA", frames=3)
         self.prune(keep=0, yes=True)
+        self.assertFalse(d.exists())
+
+    def test_frames_only_keeps_the_scribe(self) -> None:
+        d = self.bundle("AAA", frames=3)
+        self.prune(keep=0, frames_only=True, yes=True)
         self.assertFalse((d / "frames").exists())
         self.assertTrue((d / "BUNDLE.md").is_file())
         meta = json.loads((d / "meta.json").read_text())
@@ -1996,24 +2003,25 @@ class TestPruneExecution(LibraryCase):
         d = self.bundle("AAA", frames=1)
         (d / "frames.new").mkdir()
         (d / "frames.old").mkdir()
-        self.prune(keep=0, yes=True)
+        self.prune(keep=0, frames_only=True, yes=True)
         self.assertFalse((d / "frames.new").exists())
         self.assertFalse((d / "frames.old").exists())
 
-    def test_purge_takes_the_whole_bundle(self) -> None:
-        d = self.bundle("AAA", frames=3)
-        self.prune(keep=0, purge=True, yes=True)
-        self.assertFalse(d.exists())
+    def test_a_dry_run_of_the_destructive_default_says_what_goes(self) -> None:
+        out = self.bundle("AAA", frames=3) and self.prune(keep=0)
+        self.assertIn("whole bundle", out)
+        self.assertIn("dry run", out)
 
-    def test_purge_is_never_implied(self) -> None:
-        d = self.bundle("AAA", frames=3)
-        self.prune(keep=0, yes=True)
-        self.assertTrue(d.is_dir())
+    def test_frames_only_is_idempotent(self) -> None:
+        self.bundle("AAA", frames=3)
+        self.prune(keep=0, frames_only=True, yes=True)
+        self.assertIn("nothing to evict", self.prune(keep=0, frames_only=True))
 
-    def test_prune_is_idempotent(self) -> None:
+    def test_a_removed_bundle_leaves_the_library_empty(self) -> None:
         self.bundle("AAA", frames=3)
         self.prune(keep=0, yes=True)
-        self.assertIn("nothing to prune", self.prune(keep=0))
+        with self.assertRaises(SystemExit):
+            self.prune(keep=0)
 
     def test_nonsense_selectors_are_refused(self) -> None:
         self.bundle("AAA")
@@ -2041,7 +2049,7 @@ class TestPrunedBundleIsRecoverable(LibraryCase):
 
     def pruned(self):
         d = self.bundle("AAA", frames=3, cues=((0.0, "hello"),))
-        self.prune(keep=0, yes=True)
+        self.prune(keep=0, frames_only=True, yes=True)
         return d
 
     def test_window_names_the_rebuild_command(self) -> None:

@@ -1274,12 +1274,16 @@ def cmd_artifact(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------
 # 7. Library — index, search, prune
 #
-# The scribe is the artifact; the frames are a cache of it. BUNDLE.md plus
-# meta.json is tens of kilobytes and holds the transcript, the segments and the
-# URL the bundle was built from; the frames are ~5 MB per minute of video.
-# Measured across three bundles: 156 KB of scribe against 300 MB of frames,
-# 0.05%. So `prune` evicts frames and keeps everything needed to fetch them
-# again, and only `--purge` takes a scribe.
+# `prune` removes bundles. A pruned video is gone from the library: frames,
+# scribe, meta, directory.
+#
+# `--frames-only` is the other mode, and it exists because the two halves of a
+# bundle differ in size by three orders of magnitude. BUNDLE.md plus meta.json
+# is tens of kilobytes and holds the transcript, the segments and the URL the
+# bundle was built from; the frames are ~5 MB per minute. Measured across three
+# bundles: 156 KB of scribe against 300 MB of frames, 0.05%. Evicting only the
+# frames therefore reclaims essentially all of the disk while leaving the video
+# searchable and rebuildable — a cache eviction rather than a delete.
 # --------------------------------------------------------------------------
 PRUNE_BUDGET = 2 * 1024 ** 3        # library-wide ceiling `prune` defaults to
 SIZE_UNITS = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
@@ -1509,9 +1513,9 @@ def cmd_search(args: argparse.Namespace) -> None:
     print("read a span:  window <id> <start> <end>")
 
 
-def gain(entry: Entry, purge: bool) -> int:
-    """What removing this bundle would actually give back."""
-    return entry.bytes if purge else entry.reclaim
+def gain(entry: Entry, frames_only: bool) -> int:
+    """What pruning this bundle would actually give back."""
+    return entry.reclaim if frames_only else entry.bytes
 
 
 def prune_targets(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
@@ -1519,11 +1523,11 @@ def prune_targets(entries: list[Entry], args: argparse.Namespace) -> list[Entry]
     first one given wins, so a command never means two things at once.
     """
     picked = _select(entries, args)
-    # A bundle whose frames are already gone has nothing left to give. Keeping
-    # it in would print a row claiming bytes that no eviction produced, and
-    # `prune --keep 0` would never settle on "nothing to prune". `--purge`
-    # still has the scribe to take, so it is never filtered out here.
-    return [e for e in picked if gain(e, args.purge)]
+    # Under --frames-only, a bundle whose frames are already gone has nothing
+    # left to give: keeping it in would print a row claiming bytes that no
+    # eviction produced, and `prune --frames-only --keep 0` would never settle
+    # on "nothing to prune". A full prune always has the scribe to take.
+    return [e for e in picked if gain(e, args.frames_only)]
 
 
 def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
@@ -1547,7 +1551,7 @@ def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
     for e in reversed(entries):                 # least recently read first
         if total <= budget:
             break
-        take = gain(e, args.purge)
+        take = gain(e, args.frames_only)
         if not take:
             continue                            # already stripped, nothing to take
         doomed.append(e)
@@ -1555,8 +1559,8 @@ def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
     return doomed
 
 
-def drop(entry: Entry, root: Path, purge: bool = False) -> None:
-    """Delete inside one bundle, having proved it is one.
+def drop(entry: Entry, root: Path, frames_only: bool = False) -> None:
+    """Delete a bundle, or just its frames, having proved it is one.
 
     Everything here comes from `library`, which only yields directories holding
     a readable meta.json. This is nonetheless the one command in the tool that
@@ -1566,7 +1570,7 @@ def drop(entry: Entry, root: Path, purge: bool = False) -> None:
     if bundle.parent != root.resolve() or not (bundle / "meta.json").is_file():
         sys.exit(f"refusing to delete {bundle}: not a bundle directly under {root}")
 
-    if purge:
+    if not frames_only:
         shutil.rmtree(bundle, ignore_errors=True)
         return
 
@@ -1591,27 +1595,28 @@ def cmd_prune(args: argparse.Namespace) -> None:
         sys.exit(f"no bundles under {root}")
 
     targets = prune_targets(entries, args)
-    verb = "purge" if args.purge else "prune"
+    verb = "evict" if args.frames_only else "remove"
     if not targets:
         print(f"nothing to {verb} — {len(entries)} bundles, "
               f"{human(sum(e.bytes for e in entries))} on disk")
         return
 
-    freed = sum(gain(e, args.purge) for e in targets)
+    freed = sum(gain(e, args.frames_only) for e in targets)
     for e in targets:
-        print(f"{verb:<6} {clip(e.id, 12):<12} {human(gain(e, args.purge)):>8}  "
+        print(f"{verb:<6} {clip(e.id, 12):<12} {human(gain(e, args.frames_only)):>8}  "
               f"last read {time.strftime('%Y-%m-%d', time.localtime(e.used))}  "
               f"{clip(e.meta.get('title') or '', 44)}")
-    kept = "scribe kept, frames evicted" if not args.purge else "scribe deleted too"
+    what = ("frames only: the scribe stays, searchable and rebuildable"
+            if args.frames_only else "the whole bundle: scribe, frames, directory")
     print(f"\n{len(targets)} bundle{'s' if len(targets) != 1 else ''}, "
-          f"{human(freed)} — {kept}")
+          f"{human(freed)} — {what}")
 
     if not args.yes:
         print(f"dry run — nothing removed. Re-run with --yes to {verb}.")
         return
 
     for e in targets:
-        drop(e, root, purge=args.purge)
+        drop(e, root, frames_only=args.frames_only)
     print(f"{verb}d {len(targets)}, freed {human(freed)}")
 
 
@@ -1901,12 +1906,13 @@ def main() -> None:
     pr.add_argument("--older-than", type=float, default=None, metavar="DAYS",
                     help="prune bundles unread for this many days")
     pr.add_argument("--keep", type=int, default=None, metavar="N",
-                    help="keep frames for the N most recently read, prune the rest")
+                    help="keep the N most recently read, prune the rest")
     pr.add_argument("--over", default=None, metavar="SIZE",
-                    help=f"evict least-recently-read until the library fits "
-                         f"(default {human(PRUNE_BUDGET)})")
-    pr.add_argument("--purge", action="store_true",
-                    help="delete the whole bundle, scribe included")
+                    help=f"prune least-recently-read first until the library "
+                         f"fits (default {human(PRUNE_BUDGET)})")
+    pr.add_argument("--frames-only", action="store_true",
+                    help="evict the frames and keep the scribe — the video "
+                         "stays searchable and rebuildable from its URL")
     pr.add_argument("--yes", action="store_true",
                     help="actually delete; without it this is a dry run")
     pr.set_defaults(func=cmd_prune)

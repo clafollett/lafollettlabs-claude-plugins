@@ -268,11 +268,6 @@ Watch: <video_id> 12:04-14:30
 
 ## Library
 
-The scribe is the artifact: `BUNDLE.md` plus `meta.json`, tens of kilobytes,
-carrying the transcript and the URL it was built from. The frames are a cache of
-it at roughly 5 MB per minute of video, and `prune` evicts them without touching
-the scribe.
-
 ```bash
 "$PY" "$SC" index                             # id, frames, size, last read, title
 "$PY" "$SC" search "<term>"                   # across every scribe
@@ -280,12 +275,17 @@ the scribe.
 "$PY" "$SC" prune                             # prints the plan, deletes nothing
 ```
 
+`prune` removes bundles: frames, scribe, directory. `--frames-only` evicts just
+the frames — the scribe is ~0.05% of a bundle's bytes, so that reclaims nearly
+all the disk and the video stays searchable and rebuildable from its URL.
+
 | Want | Do |
 | - | - |
 | which video said something | `search "<term>"` |
 | what is scribed at all | `index` |
-| disk back, scribes kept | `prune --yes` |
-| one video gone entirely | `prune --id <id> --purge --yes` |
+| one video gone | `prune --id <id> --yes` |
+| the library trimmed | `prune --yes` |
+| disk back, videos still findable | `prune --frames-only --yes` |
 
 A `search` hit prints the bundle path once, then `HH:MM:SS` and
 `frames/HH-MM-SS.jpg` per line — the frame that was on screen when that line was
@@ -301,10 +301,16 @@ spoken. Join the two to Read it. `-` there means the frames were pruned.
 | `--over <size>` | least-recently-read first, until the library fits under it |
 | none of them | as `--over 2G` |
 
+| Mode | Removes | Leaves |
+| - | - | - |
+| default | the bundle directory | nothing |
+| `--frames-only` | `frames/` | the scribe, searchable, with its URL |
+
 ```
 if the user asks to free space or clean up:
     run prune, show the plan, stop
-    # --yes deletes. It is the user's call, never yours to add
+    # --yes deletes, and the default takes the scribe too.
+    # It is the user's call, never yours to add
 ```
 
 ## Re-watching a cited span
