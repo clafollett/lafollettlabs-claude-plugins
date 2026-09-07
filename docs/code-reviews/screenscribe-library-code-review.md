@@ -252,4 +252,34 @@ diff added new consumers of both without carrying either forward.
 
 ---
 
+## Remediation (post-review, v0.6.1)
+
+All 1 HIGH, 7 MEDIUM and 10 LOW findings fixed. Each of the three reproductions
+that produced the review's most serious findings was re-run against the fix:
+
+| Finding | Before | After |
+| - | - | - |
+| HIGH-001 | `removed 2, freed 69B` — two foreign directories destroyed | `no bundles under <dir>`, `index.js` intact |
+| MEDIUM-001 | two bundle headers with zero rows under them | headers print only for bundles that render a row |
+| MEDIUM-004 | `BUNDLE.md` byte-identical after prune, `frames/00-00-06.jpg` dead | scribe carries the pruned note and `build <url>` |
+
+Notable in the fixes:
+
+- The bundle signature now requires `BUNDLE.md` **and** a `meta` naming the
+  video, and `drop()` re-derives it rather than trusting `library()`.
+- `Entry` measures sizes on first access, so `search` and the name resolver walk
+  no frames. A test fails if `os.walk` is called during a search.
+- `search` counts in one pass and renders in another, so `--limit` bounds the
+  output without making the withheld-count wrong.
+- `drop()` reports a refusal and continues instead of exiting mid-loop.
+- SKILL.md's Library section went from 72 lines to 62 while gaining `--root`,
+  `--json` and `--limit`; `--yes` now appears once in the file, in the guardrail.
+
+24 regression tests (220 -> 244), green on both interpreters.
+
+INFO-001 is unchanged by design. INFO-002 through INFO-005 are addressed by the
+SKILL.md rewrite.
+
+---
+
 Generated with Claude Code

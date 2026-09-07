@@ -1702,7 +1702,7 @@ class LibraryCase(TempDirCase):
     driven without downloading anything."""
 
     def bundle(self, vid, *, frames=3, title=None, cues=(), used=None,
-               pruned=None, url=None, channel="chan"):
+               pruned=None, url=None, channel="chan", scribe=False):
         dest = self.tmp / vid
         (dest / "frames").mkdir(parents=True)
         for ts in range(frames):
@@ -1718,7 +1718,9 @@ class LibraryCase(TempDirCase):
         if pruned:
             meta["pruned"] = pruned
         (dest / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
-        (dest / "BUNDLE.md").write_text("# scribe\n", encoding="utf-8")
+        body = ["# scribe", "", "## Transcript", ""] + sc.TRANSCRIPT_NOTE \
+            if scribe else ["# scribe", ""]
+        (dest / "BUNDLE.md").write_text("\n".join(body), encoding="utf-8")
         if used is not None:
             marker = dest / sc.USED_MARKER
             marker.touch()
@@ -2034,9 +2036,19 @@ class TestPruneExecution(LibraryCase):
         deletes, so it re-derives containment rather than trusting a caller."""
         d = self.bundle("AAA", frames=1)
         (entry,) = sc.library(self.tmp)
-        with self.assertRaises(SystemExit):
-            sc.drop(entry, self.tmp / "elsewhere")
+        with redirect_stdout(io.StringIO()) as buf:
+            refused = sc.drop(entry, self.tmp / "elsewhere")
+        self.assertFalse(refused)
+        self.assertIn("skipped", buf.getvalue())
         self.assertTrue((d / "frames").is_dir())
+
+    def test_one_refusal_does_not_abandon_the_rest(self) -> None:
+        """It reports and moves on: exiting mid-loop left a prune half applied
+        and unsummarised."""
+        self.bundle("AAA", frames=1)
+        self.bundle("BBB", frames=1)
+        out = self.prune(keep=0, yes=True)
+        self.assertIn("removed 2", out)
 
     def test_an_empty_library_is_an_error(self) -> None:
         with self.assertRaises(SystemExit):
@@ -2196,6 +2208,200 @@ class TestNamingAVideo(LibraryCase):
         self.bundle("QQQ", title="Q talk", cues=((0.0, "a word about oracles"),))
         out = self.search("oracles", id=["Q talk"])
         self.assertIn("QQQ", out)
+
+
+class TestBundleSignature(LibraryCase):
+    """Round-1 HIGH: `prune --yes` rmtree'd directories that were never
+    bundles, because a `meta.json` was the whole test and that filename is
+    everywhere. An npm package and a photo folder were destroyed proving it."""
+
+    def foreign(self, name, meta):
+        d = self.tmp / name
+        d.mkdir()
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        (d / "keep-me.txt").write_text("not yours", encoding="utf-8")
+        return d
+
+    def test_a_foreign_meta_json_is_not_a_bundle(self) -> None:
+        self.foreign("some-node-package", {"name": "thing", "version": "1.0.0"})
+        self.foreign("my-photos", {"camera": "X100V"})
+        self.assertEqual(sc.library(self.tmp), [])
+
+    def test_prune_will_not_delete_one(self) -> None:
+        d = self.foreign("some-node-package", {"name": "thing"})
+        self.bundle("AAA", frames=1)
+        self.prune(keep=0, yes=True)
+        self.assertTrue((d / "keep-me.txt").is_file())
+
+    def test_a_meta_without_an_id_is_not_a_bundle(self) -> None:
+        d = self.foreign("odd", {"title": "no id here"})
+        (d / "BUNDLE.md").write_text("# not really", encoding="utf-8")
+        self.assertEqual(sc.library(self.tmp), [])
+
+    def test_a_directory_without_a_scribe_is_not_a_bundle(self) -> None:
+        d = self.bundle("AAA", frames=1)
+        (d / "BUNDLE.md").unlink()
+        self.assertEqual(sc.library(self.tmp), [])
+
+    def test_drop_re_derives_the_signature_it_was_handed(self) -> None:
+        """library() is the gate, but drop() is what deletes."""
+        d = self.bundle("AAA", frames=1)
+        (entry,) = sc.library(self.tmp)
+        (d / "BUNDLE.md").unlink()
+        with redirect_stdout(io.StringIO()):
+            self.assertFalse(sc.drop(entry, self.tmp))
+        self.assertTrue(d.is_dir())
+
+    def test_a_real_bundle_still_qualifies(self) -> None:
+        self.bundle("AAA", frames=1)
+        self.assertEqual([e.id for e in sc.library(self.tmp)], ["AAA"])
+
+
+class TestSizesAreLazy(LibraryCase):
+    """Round-1 MEDIUM: the comment claimed frames were walked only for a
+    matching bundle; library() had already walked every one of them."""
+
+    def test_a_scan_measures_nothing_until_asked(self) -> None:
+        self.bundle("AAA", frames=3)
+        (entry,) = sc.library(self.tmp)
+        self.assertIsNone(entry._bytes)
+        self.assertIsNone(entry._reclaim)
+        self.assertGreater(entry.bytes, 0)
+        self.assertIsNotNone(entry._bytes)
+
+    def test_search_never_walks_the_frames_for_sizes(self) -> None:
+        self.bundle("AAA", frames=3, cues=((0.0, "a widget"),))
+        walked = []
+        real = os.walk
+        os.walk = lambda p, **kw: (walked.append(str(p)), real(p, **kw))[1]
+        try:
+            self.search("widget")
+        finally:
+            os.walk = real
+        self.assertEqual(walked, [])
+
+    def test_index_still_reports_real_sizes(self) -> None:
+        self.bundle("AAA", frames=3)
+        self.assertNotIn("0B on disk", self.index())
+
+
+class TestClipStripsControlCharacters(unittest.TestCase):
+    """A title is network-derived, and `prune`'s plan is what a person reads
+    before authorising a delete. ESC is not whitespace, so split() leaves it."""
+
+    def test_escape_sequences_do_not_survive(self) -> None:
+        hostile = "Safe Video\x1b[2K\r  VID9  Totally Different"
+        out = sc.clip(hostile, 80)
+        self.assertNotIn("\x1b", out)
+        self.assertIn("Safe Video", out)
+
+    def test_other_control_characters_go_too(self) -> None:
+        for ch in ("\x00", "\x07", "\x1b", "\x7f", "\x9b"):
+            self.assertNotIn(ch, sc.clip(f"a{ch}b", 80))
+
+    def test_ordinary_text_is_untouched(self) -> None:
+        self.assertEqual(sc.clip("  a   b  ", 80), "a b")
+        self.assertEqual(sc.clip("héllo — wörld", 80), "héllo — wörld")
+
+    def test_it_still_clips(self) -> None:
+        self.assertEqual(sc.clip("abcdef", 4), "abc…")
+
+
+class TestPrunedScribeDescribesItself(LibraryCase):
+    """Round-1 MEDIUM: BUNDLE.md kept telling its reader that a missing frame
+    meant the screen was unchanged, after every frame had been evicted."""
+
+    def scribe(self, d):
+        return (d / "BUNDLE.md").read_text(encoding="utf-8")
+
+    def test_the_stale_rule_is_replaced(self) -> None:
+        d = self.bundle("AAA", frames=3, scribe=True)
+        self.assertIn("was unchanged, NOT that nothing was on screen",
+                      self.scribe(d))
+        self.prune(keep=0, frames_only=True, yes=True)
+        self.assertNotIn("was unchanged, NOT that nothing was on screen",
+                         self.scribe(d))
+        self.assertIn(sc.PRUNED_MARK, self.scribe(d))
+
+    def test_it_names_the_rebuild_command(self) -> None:
+        d = self.bundle("AAA", frames=3, scribe=True)
+        self.prune(keep=0, frames_only=True, yes=True)
+        self.assertIn("build https://example.test/AAA", self.scribe(d))
+
+    def test_a_scribe_without_the_known_note_gets_a_banner(self) -> None:
+        """Built before the note was named — prepend rather than stay silent."""
+        d = self.bundle("AAA", frames=3, scribe=False)
+        self.prune(keep=0, frames_only=True, yes=True)
+        self.assertIn(sc.PRUNED_MARK, self.scribe(d))
+
+    def test_the_transcript_survives(self) -> None:
+        d = self.bundle("AAA", frames=3, scribe=True)
+        self.prune(keep=0, frames_only=True, yes=True)
+        self.assertIn("# scribe", self.scribe(d))
+
+    def test_a_full_prune_leaves_no_scribe_to_mark(self) -> None:
+        d = self.bundle("AAA", frames=3, scribe=True)
+        self.prune(keep=0, yes=True)
+        self.assertFalse(d.exists())
+
+
+class TestSearchOutput(LibraryCase):
+    def many(self, n=3, per=4):
+        for i in range(n):
+            self.bundle(f"VID{i}", frames=2, title=f"talk {i}",
+                        cues=tuple((float(t), "the word widget here")
+                                   for t in range(per)))
+
+    def test_the_limit_never_prints_an_empty_header(self) -> None:
+        """A header over no rows reads as "matched, nothing to show"."""
+        self.many()
+        out = self.search("widget", limit=2)
+        bodies = {}
+        current = None
+        for line in out.splitlines():
+            if line.startswith("VID"):
+                current = line.split()[0]
+                bodies[current] = 0
+            elif current and line.strip().startswith(">"):
+                bodies[current] += 1
+        self.assertTrue(bodies)
+        for vid, rows in bodies.items():
+            self.assertGreater(rows, 0, f"{vid} printed a header with no rows")
+
+    def test_the_count_of_what_was_withheld_is_honest(self) -> None:
+        self.many(n=3, per=4)          # 12 hits total
+        out = self.search("widget", limit=2)
+        self.assertIn("12 hits in 3 of 3 bundles", out)
+        self.assertIn("10 more", out)
+        self.assertIn("--limit 0", out)
+
+    def test_limit_zero_shows_everything(self) -> None:
+        self.many(n=2, per=3)
+        out = self.search("widget", limit=0)
+        self.assertNotIn("stopped at", out)
+        self.assertEqual(sum(1 for ln in out.splitlines()
+                             if ln.strip().startswith(">")), 6)
+
+    def test_adjacent_hits_do_not_repeat_their_context(self) -> None:
+        self.bundle("AAA", frames=1, cues=((0.0, "before"), (1.0, "widget one"),
+                                           (2.0, "widget two"), (3.0, "after")))
+        out = self.search("widget", context=1)
+        self.assertEqual(out.count("widget one"), 1)
+        self.assertEqual(out.count("widget two"), 1)
+        self.assertEqual(out.count("before"), 1)
+
+    def test_a_cue_missing_start_is_skipped_not_a_traceback(self) -> None:
+        d = self.tmp / "AAA"
+        (d / "frames").mkdir(parents=True)
+        (d / "BUNDLE.md").write_text("# scribe", encoding="utf-8")
+        (d / "meta.json").write_text(json.dumps({
+            "id": "AAA", "title": "T", "duration": 60,
+            "url": "https://example.test/AAA",
+            "transcript": [{"text": "a widget with no start"},
+                           {"start": 1.0, "text": "a widget with one"}],
+        }), encoding="utf-8")
+        out = self.search("widget")
+        self.assertIn("1 hit", out)
 
 
 if __name__ == "__main__":

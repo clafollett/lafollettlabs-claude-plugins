@@ -153,7 +153,8 @@ from, and camera frames are on disk under the same scheme with no `FRAME` line.
 
 ```
 if a timestamp has no frame on disk:
-    the screen did not change — read the nearest earlier frame
+    if frames/ is gone:  the bundle was pruned — rebuild from meta.json's url
+    else:                the screen did not change — read the nearest earlier frame
     do NOT conclude nothing was on screen
 ```
 
@@ -268,65 +269,57 @@ Watch: <video_id> 12:04-14:30
 
 ## Library
 
-`index` scans the bundle root. A new `build` appears in it with no bookkeeping,
-and there is no list file to keep in step.
+The scribe is `BUNDLE.md`: the transcript with frame pointers. It survives a
+`--frames-only` prune; the frames do not.
 
 ```bash
-"$PY" "$SC" index                             # id, frames, size, last read, title
-"$PY" "$SC" search "<term>"                   # across every scribe
-"$PY" "$SC" search "<term>" -C 2 --id <video> # with context, one video
-"$PY" "$SC" prune                             # prints the plan, deletes nothing
+"$PY" "$SC" index                           # id, frames, size, length, last read, title
+"$PY" "$SC" index --json                    # adds url, pruned, path
+"$PY" "$SC" index --root ./bundles          # a library built with -o
+"$PY" "$SC" search "<term>"                 # every scribe, first 40 hits
+"$PY" "$SC" search "<term>" -C 2 --limit 0  # with context, all hits
+"$PY" "$SC" search "<term>" --id <video>    # one video
+"$PY" "$SC" prune                           # prints the plan, deletes nothing
+"$PY" "$SC" prune --frames-only             # keep the scribe, drop the frames
 ```
 
-Every command that takes a video accepts any of these, so the user never has
-to produce an id:
+`index` scans the bundle root, so a new `build` appears with no bookkeeping.
+A bundle built with `-o` is not in that root — pass `--root`.
 
-| They say | Pass it through |
+Naming a video, anywhere one is taken:
+
+| They say | Pass |
 | - | - |
 | `xgkjtF89-44` | the id |
-| "the NASA one" | `NASA` — any words from the title |
+| "the NASA one" | `NASA` — a contiguous phrase from the title |
 | "that Matt Pocock video" | `Pocock` — the channel |
-| a pasted link | the URL, in any shape |
-
-Ambiguity is refused with the candidates listed, never guessed. Resolve it by
-naming the video more precisely, or by asking the user which one.
+| a pasted link | the URL, any shape |
 
 ```
+if the name matches more than one video:
+    it is refused with the candidates listed — show the user those and ask which
 if the user names a video you cannot place:
-    run index, match it yourself, and use the id
-    # do NOT ask them for an id — index is what that question is for
+    run index and match it yourself
 ```
-
-`prune` removes bundles: frames, scribe, directory. `--frames-only` evicts just
-the frames — the scribe is ~0.05% of a bundle's bytes, so that reclaims nearly
-all the disk and the video stays searchable and rebuildable from its URL.
-
-| Want | Do |
-| - | - |
-| which video said something | `search "<term>"` |
-| what is scribed at all | `index` |
-| one video gone | `prune --id <video> --yes` |
-| the library trimmed | `prune --yes` |
-| disk back, videos still findable | `prune --frames-only --yes` |
 
 A `search` hit prints the bundle path once, then `HH:MM:SS` and
-`frames/HH-MM-SS.jpg` per line — the frame that was on screen when that line was
-spoken. Join the two to Read it. `-` there means the frames were pruned.
+`frames/HH-MM-SS.jpg` per line — the frame on screen when that line was spoken.
+Join the two to Read it. `-` means no frame is on disk for that cue; `index`
+says whether the bundle was pruned.
 
-`prune` selectors do not combine. The first one given wins:
+`prune` removes the bundle directory. `--frames-only` removes `frames/` and
+leaves the scribe searchable and rebuildable from its URL.
+
+Selector precedence, highest first. They do not combine, and it is not argument
+order:
 
 | Selector | Prunes |
 | - | - |
 | `--id <video>` | exactly those, repeatable |
 | `--older-than <days>` | bundles unread for that long |
 | `--keep <n>` | all but the n most recently read |
-| `--over <size>` | least-recently-read first, until the library fits under it |
+| `--over <size>` | least-recently-read first, until the library fits |
 | none of them | as `--over 2G` |
-
-| Mode | Removes | Leaves |
-| - | - | - |
-| default | the bundle directory | nothing |
-| `--frames-only` | `frames/` | the scribe, searchable, with its URL |
 
 ```
 if the user asks to free space or clean up:
@@ -348,5 +341,6 @@ if bundle directory is gone:
     say so, ask for the URL, stop
 elif window says "frames pruned":
     offer the build command it printed, stop
-    # do NOT work from the prose summary and call the citation discharged
+# either way: do NOT work from the prose summary and call the citation
+# discharged
 ```
