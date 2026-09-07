@@ -13,6 +13,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1595,6 +1596,102 @@ class TestBootstrap(TempDirCase):
         with redirect_stdout(buf), redirect_stderr(io.StringIO()):
             sc.cmd_bootstrap(argparse.Namespace(venv=str(venv)))
         self.assertEqual(buf.getvalue().strip(), str(py))
+
+
+
+class TestUsefulLinksAnchoring(unittest.TestCase):
+    """Substring matching ate the technical links the filter exists to keep."""
+
+    DESC = """
+    https://docs.aws.amazon.com/lambda/latest/dg/welcome.html
+    https://phoenix.com/engineering/blog
+    https://s3.amazonaws.com/bucket/spec.pdf
+    https://github.com/real/repo
+    https://amzn.to/affiliate
+    https://www.amazon.com/dp/B0123456
+    https://x.com/someone
+    https://patreon.com/creator
+    https://youtube.com/watch?v=abc&sub_confirmation=1
+    """
+
+    def links(self):
+        return sc.useful_links(self.DESC)
+
+    def test_aws_docs_survive(self) -> None:
+        """`amazon.` matched docs.aws.amazon.com — an AWS docs link."""
+        self.assertIn("https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
+                      self.links())
+
+    def test_a_host_merely_ending_in_x_com_survives(self) -> None:
+        """`x.com/` matched phoenix.com/."""
+        self.assertIn("https://phoenix.com/engineering/blog", self.links())
+
+    def test_real_affiliate_and_social_still_dropped(self) -> None:
+        got = self.links()
+        for dead in ("https://amzn.to/affiliate",
+                     "https://www.amazon.com/dp/B0123456",
+                     "https://x.com/someone",
+                     "https://patreon.com/creator",
+                     "https://youtube.com/watch?v=abc&sub_confirmation=1"):
+            self.assertNotIn(dead, got, f"{dead} should be filtered")
+
+    def test_subdomains_of_a_noise_host_are_dropped(self) -> None:
+        self.assertEqual(sc.useful_links("https://open.spotify.com/show/xyz"), [])
+
+    def test_a_bare_youtube_link_is_kept(self) -> None:
+        """A description linking a prerequisite video is context worth keeping."""
+        self.assertEqual(sc.useful_links("https://youtube.com/watch?v=abc"),
+                         ["https://youtube.com/watch?v=abc"])
+
+
+@unittest.skipUnless(HAVE_IMAGING, "imagehash/Pillow not installed")
+class TestArtifactSafety(TempDirCase):
+    TEMPLATE = Path(__file__).resolve().parent.parent / "assets" / "artifact-template.html"
+
+    def bundle(self, title="T", transcript=(), frame_secs=(0, 5, 10)):
+        from PIL import Image, ImageDraw
+        dest = self.tmp / "VID"
+        (dest / "frames").mkdir(parents=True)
+        for i in frame_secs:
+            im = Image.new("RGB", (1408, 792), (18, 20, 30))
+            d = ImageDraw.Draw(im)
+            d.rectangle([60, 120, 190 + i * 60, 620], fill=(230, 230, 225))
+            im.save(dest / "frames" / f"{sc.hhmmss(i, sep='-')}.jpg", "JPEG")
+        (dest / "meta.json").write_text(json.dumps({
+            "id": "VID", "title": title, "channel": "C", "duration": 40,
+            "url": "u", "fps": 1.0, "frame_count": len(frame_secs),
+            "chapters": [], "description": "",
+            "transcript": [{"start": t, "text": x} for t, x in transcript],
+        }), encoding="utf-8")
+        return dest
+
+    def build(self, dest, start=0, end=30):
+        out = self.tmp / "p.html"
+        with redirect_stdout(io.StringIO()):
+            sc.build_artifact(dest, start, end, out, self.TEMPLATE, sc.DISPLAY_DISTANCE)
+        return out.read_text(encoding="utf-8")
+
+    def test_a_hostile_title_cannot_break_out_of_the_title_element(self) -> None:
+        """The title is network-derived metadata landing in raw markup."""
+        html = self.build(self.bundle(
+            title="</title><script>alert(document.domain)</script>"))
+        self.assertNotIn("<script>alert(document.domain)</script>", html)
+        self.assertIn("&lt;/title&gt;", html)
+
+    def test_narration_before_the_first_frame_reaches_the_page(self) -> None:
+        """Anchoring row 0 at its own ts dropped every earlier cue, silently."""
+        dest = self.bundle(frame_secs=(10, 15, 20),
+                           transcript=((3.0, "BEFORE_FIRST_FRAME"),
+                                       (12.0, "during")))
+        html = self.build(dest, 0, 30)
+        D = json.loads(re.search(r"^var D = (\{.*\});$", html, re.M | re.S).group(1))
+        said = " ".join(f["said"] for f in D["frames"])
+        self.assertIn("BEFORE_FIRST_FRAME", said)
+        self.assertIn("during", said)
+
+    def test_payload_cannot_close_the_script_element(self) -> None:
+        html = self.build(self.bundle(transcript=((1.0, "</script><b>x</b>"),)))
+        self.assertNotIn("</script><b>x</b>", html)
 
 
 

@@ -176,9 +176,9 @@ first.
 
 The venv lives under `$HOME`, deliberately not in `~/.claude/plugins/cache/`:
 that directory holds versions side by side and gets a fresh one on every plugin
-update, so anything installed there is orphaned immediately. The skill prefers
-`~/.screenscribe/venv/bin/python` when it exists and falls back to `python3`, so
-a system-wide install works too.
+update, so anything installed there is orphaned immediately. The skill runs
+`screenscribe.py bootstrap`, which creates the venv when it is missing, installs
+anything absent, and prints the interpreter path the skill then binds.
 
 For developing this repo, a throwaway `.venv` at the repo root is enough — it is
 gitignored, and the test suite is stdlib-only apart from `imagehash`/`pillow`:

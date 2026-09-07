@@ -139,19 +139,35 @@ URL_RE = re.compile(r"https?://[^\s<>\")\]]+")
 # what is NOT here: youtube.com/watch and youtu.be stay, because a description
 # linking a prerequisite video is exactly the context worth keeping — only the
 # subscribe call-to-action is filtered.
-LINK_NOISE = (
+# Matched against the parsed hostname — exactly, or as a subdomain of it.
+#
+# NOT as a substring of the URL, which is what this used to do and which ate the
+# technical links the list exists to protect: "amazon." dropped
+# `docs.aws.amazon.com/lambda/...`, and "x.com/" dropped
+# `phoenix.com/engineering/blog`.
+NOISE_HOSTS = (
     # affiliate / storefront
-    "amzn.to", "amazon.", "bit.ly", "linktr.ee", "epidemicsound", "skl.sh",
-    "brilliant.org/", "squarespace.com/", "nordvpn", "honey.", "impact.com",
+    "amzn.to", "bit.ly", "linktr.ee", "epidemicsound.com", "skl.sh",
+    "brilliant.org", "squarespace.com", "nordvpn.com", "joinhoney.com",
+    "impact.com",
     # tip jars
-    "/patreon", "patreon.com", "buymeacoffee", "ko-fi.com", "paypal.",
+    "patreon.com", "buymeacoffee.com", "ko-fi.com", "paypal.com",
     # social and chat
-    "twitter.com", "x.com/", "instagram.com", "tiktok.com", "facebook.com",
-    "discord.gg", "t.me/", "threads.net", "bsky.app", "mastodon",
+    "twitter.com", "x.com", "instagram.com", "tiktok.com", "facebook.com",
+    "discord.gg", "t.me", "threads.net", "bsky.app", "mastodon.social",
     # channel promo
-    "sub_confirmation", "buzzsprout", "anchor.fm", "spotify.com/show",
-    "podcasts.apple.com",
+    "buzzsprout.com", "anchor.fm", "podcasts.apple.com",
 )
+
+# Promotional paths on hosts that also serve real content. amazon.com is here
+# rather than in NOISE_HOSTS precisely so `docs.aws.amazon.com` survives.
+NOISE_HOST_PATHS = (
+    ("amazon.com", "/dp/"), ("amazon.com", "/gp/"),
+    ("spotify.com", "/show"),
+)
+
+# Substrings anywhere in the URL. Only for markers that are unambiguous.
+NOISE_MARKERS = ("sub_confirmation",)
 
 # Where bundles live: --out, then $SCREENSCRIBE_BUNDLES, then ~/.screenscribe/bundles.
 #
@@ -779,11 +795,27 @@ def rename_by_timestamp(frames: list[Frame], outdir: Path) -> list[Frame]:
 # --------------------------------------------------------------------------
 def useful_links(description: str) -> list[str]:
     """URLs from the description, minus the affiliate and social boilerplate."""
+    from urllib.parse import urlparse
+
+    def noisy(url: str) -> bool:
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return True                      # unparseable is not a useful link
+        host = (parsed.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        path = (parsed.path or "").lower()
+        matches = lambda h: host == h or host.endswith("." + h)   # noqa: E731
+        return (any(matches(n) for n in NOISE_HOSTS)
+                or any(matches(h) and path.startswith(p)
+                       for h, p in NOISE_HOST_PATHS)
+                or any(m in url.lower() for m in NOISE_MARKERS))
+
     seen: list[str] = []
     for url in URL_RE.findall(description or ""):
         url = url.rstrip(".,;:)")
-        low = url.lower()
-        if any(n in low for n in LINK_NOISE) or url in seen:
+        if url in seen or noisy(url):
             continue
         seen.append(url)
     return seen
@@ -908,9 +940,14 @@ def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) ->
         "## Transcript",
         "",
         "> Interleaved with the frames that were on screen while each line was",
-        "> spoken. `grep FRAME` lists every frame worth reading. Frames are named",
-        "> for their timestamp, so any line here maps to `frames/HH-MM-SS.jpg`",
-        "> whether or not a FRAME line was emitted for it.",
+        "> spoken. `grep FRAME` lists every frame worth reading, and a FRAME",
+        "> line's path is literal.",
+        ">",
+        "> Frames are named for the second they came from. Camera frames are on",
+        "> disk under the same scheme with no FRAME line. Seconds whose screen",
+        "> did not change have no file at all — a missing frame means the screen",
+        "> was unchanged, NOT that nothing was on screen. Read the nearest",
+        "> earlier frame.",
         "",
     ]
     # Said even when frames follow: "no narration at all" is a fact about the
@@ -1118,8 +1155,13 @@ def build_artifact(bundle: Path, start: float, end: float, out: Path,
     cues = [c for c in meta.get("transcript", []) if start - 8 <= c["start"] <= end + 8]
     rows = []
     for i, f in enumerate(frames):
+        # The first row reaches back to the start of the span, not to its own
+        # timestamp. Anchoring it at f.ts dropped every cue spoken before the
+        # first surviving frame — on a page whose whole purpose is pairing
+        # narration with the screen it was spoken over, and silently.
+        lo = start - 8 if i == 0 else f.ts
         nxt = frames[i + 1].ts if i + 1 < len(frames) else end + 8
-        said = " ".join(c["text"] for c in cues if f.ts <= c["start"] < nxt).strip()
+        said = " ".join(c["text"] for c in cues if lo <= c["start"] < nxt).strip()
         rows.append({"t": f.ts, "label": hhmmss(f.ts),
                      "said": said,
                      "img": encode_frame(f.path, ARTIFACT_WIDTH, ARTIFACT_QUALITY)})
@@ -1140,8 +1182,19 @@ def build_artifact(bundle: Path, start: float, end: float, out: Path,
         "frames": rows,
     }
 
+    # The title is network-derived third-party metadata and lands inside
+    # <title> as raw markup. Unescaped, a title of
+    # `</title><script>...</script>` breaks out and executes in a page this
+    # tool then tells you to publish. Same untrusted source as the video id,
+    # which already required safe_dest() for a real path traversal.
+    #
+    # The payload below needs no such escape: the template assigns every field
+    # with textContent, and `</` is neutralized so the JSON cannot close the
+    # script element early.
+    import html as html_escape
+
     html = template.read_text(encoding="utf-8")
-    html = html.replace("__TITLE__", payload["title"])
+    html = html.replace("__TITLE__", html_escape.escape(payload["title"], quote=True))
     html = html.replace(
         "var D = window.__SCRIBE__;",
         "var D = " + json.dumps(payload).replace("</", "<\\/") + ";",
