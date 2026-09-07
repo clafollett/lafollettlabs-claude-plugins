@@ -33,6 +33,12 @@ try:
 except ImportError:
     HAVE_IMAGING = False
 
+try:
+    import yt_dlp  # noqa: F401
+    HAVE_YTDLP = True
+except ImportError:
+    HAVE_YTDLP = False
+
 
 class TempDirCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -357,12 +363,99 @@ class TestFetchOptions(unittest.TestCase):
         self.assertEqual(sort[0], "res:1080", "resolution must outrank size")
         self.assertIn("+size", sort)
 
+    def sub_opts(self) -> dict:
+        import inspect
+        src = inspect.getsource(sc.fetch_subtitles)
+        ns: dict = {}
+        body = src[src.index("opts = {"):src.index("try:")]
+        exec(body, {"workdir": Path("/tmp/x"), "lang": "en"}, ns)
+        return ns["opts"]
+
     def test_prefers_json3_over_vtt(self) -> None:
         """json3 is YouTube's own format and arrives already de-duplicated; the
         rolling repetition is an artefact of VTT's scrolling display model."""
-        o = self.opts()
+        o = self.sub_opts()
         self.assertEqual(o["subtitlesformat"], "json3/vtt")
         self.assertIs(o["writesubtitles"], True)
+
+    def test_video_pass_requests_no_subtitles(self) -> None:
+        """Subtitles ride in their own pass so a 429 there cannot kill the
+        video download — yt-dlp writes subs BEFORE the media file."""
+        o = self.opts()
+        self.assertNotIn("writesubtitles", o)
+        self.assertNotIn("subtitleslangs", o)
+
+    def test_subtitle_pass_skips_the_download(self) -> None:
+        self.assertIs(self.sub_opts()["skip_download"], True)
+
+    def test_subtitle_pass_requests_one_language_at_a_time(self) -> None:
+        """Three langs x manual+auto is up to six hits on the endpoint that
+        rate-limits hardest; they are tried in order and the first wins."""
+        self.assertEqual(len(self.sub_opts()["subtitleslangs"]), 1)
+
+
+@unittest.skipUnless(HAVE_YTDLP, "yt-dlp not installed")
+class TestSubtitleFailureIsNotFatal(TempDirCase):
+    """Two consecutive 58-minute builds died on HTTP 429 at _write_subtitles."""
+
+    def run_with(self, side_effect):
+        import yt_dlp
+        calls = {"n": 0}
+
+        class FakeYDL:
+            def __init__(self, opts): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, url, download=False):
+                calls["n"] += 1
+                side_effect()
+
+        real, sleep = yt_dlp.YoutubeDL, sc.time.sleep
+        yt_dlp.YoutubeDL = FakeYDL
+        sc.time.sleep = lambda _: None
+        self.addCleanup(setattr, yt_dlp, "YoutubeDL", real)
+        self.addCleanup(setattr, sc.time, "sleep", sleep)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ok = sc.fetch_subtitles("u", self.tmp)
+        return ok, calls["n"], buf.getvalue()
+
+    def test_a_429_returns_false_instead_of_raising(self) -> None:
+        def boom():
+            raise Exception("ERROR: Unable to download video subtitles for 'en': "
+                            "HTTP Error 429: Too Many Requests")
+        ok, _, out = self.run_with(boom)
+        self.assertFalse(ok)
+        self.assertIn("continuing without narration", out)
+        self.assertIn("429", out)
+
+    def test_it_retries_before_giving_up(self) -> None:
+        def boom():
+            raise Exception("HTTP Error 429: Too Many Requests")
+        _, n, _ = self.run_with(boom)
+        self.assertEqual(n, 9, "3 attempts x 3 languages")
+
+    def test_original_language_track_is_tried_first(self) -> None:
+        """`en` is YouTube's PROCESSED English; `en-orig` is the real ASR.
+
+        Requesting `en` first returned a paraphrase of the video: disfluencies
+        and `>>` markers stripped, words inserted, acronyms expanded. That is
+        derived evidence, which is the one thing this tool must not cite.
+        """
+        import inspect
+        src = inspect.getsource(sc.fetch_subtitles)
+        line = next(l for l in src.splitlines() if "for lang in" in l)
+        order = [x.strip().strip('"\'') for x in
+                 line[line.index("(") + 1:line.rindex(")")].split(",") if x.strip()]
+        self.assertEqual(order[0], "en-orig",
+                         f"original track must be tried first, got {order}")
+        self.assertIn("en", order)
+
+    def test_success_stops_after_the_first_language(self) -> None:
+        (self.tmp / "video.en.json3").write_text('{"events":[]}', encoding="utf-8")
+        ok, n, _ = self.run_with(lambda: None)
+        self.assertTrue(ok)
+        self.assertEqual(n, 1)
 
 
 # --------------------------------------------------------------------------
@@ -753,7 +846,8 @@ class TestCmdBuild(TempDirCase):
 
     def run_build(self, out: Path, **kw):
         ns = dict(url="u", out=out, fps=1.0, phash_distance=sc.PHASH_DISTANCE,
-                  crop=None, keep_video=False)
+                  crop=None, keep_video=False, whole_frame_hash=False,
+                  content_flatness=sc.CONTENT_FLATNESS)
         ns.update(kw)
         with self.silent() as buf:
             sc.cmd_build(argparse.Namespace(**ns))
@@ -835,7 +929,8 @@ class TestCmdBuildPreflight(TempDirCase):
 
     def ns(self, **kw):
         d = dict(url="u", out=self.tmp, fps=1.0, phash_distance=sc.PHASH_DISTANCE,
-                 crop=None, keep_video=False)
+                 crop=None, keep_video=False, whole_frame_hash=False,
+                 content_flatness=sc.CONTENT_FLATNESS)
         d.update(kw)
         return argparse.Namespace(**d)
 
@@ -893,33 +988,117 @@ class TestRetentionWarning(TempDirCase):
                                     {"id": "V", "title": "T", "channel": "C",
                                      "duration": 70, "url": url, "description": "",
                                      "chapters": []})[1]
-        sc.dedupe = lambda frames, d: frames        # nothing culled
+        sc.dedupe = lambda frames, d, whole=False: frames        # nothing culled
         buf = io.StringIO()
         with redirect_stdout(buf):
             sc.cmd_build(argparse.Namespace(
                 url="u", out=self.tmp / "b", fps=1.0,
-                phash_distance=sc.PHASH_DISTANCE, crop=None, keep_video=False))
+                phash_distance=sc.PHASH_DISTANCE, crop=None, keep_video=False,
+                whole_frame_hash=False, content_flatness=sc.CONTENT_FLATNESS))
         out = buf.getvalue()
         self.assertIn("dedupe kept", out)
-        self.assertIn("--crop", out)
+        self.assertIn("--fps", out)
 
 
 class TestCmdWindow(TempDirCase):
     def test_rejects_reversed_span(self) -> None:
         with self.assertRaises(SystemExit) as cm:
             sc.cmd_window(argparse.Namespace(
-                bundle=self.tmp, start="5:00", end="2:00", force=False))
+                bundle=self.tmp, start="5:00", end="2:00", force=False, every=False))
         self.assertIn("must be after", str(cm.exception))
 
     def test_rejects_equal_span(self) -> None:
         with self.assertRaises(SystemExit):
             sc.cmd_window(argparse.Namespace(
-                bundle=self.tmp, start="2:00", end="2:00", force=False))
+                bundle=self.tmp, start="2:00", end="2:00", force=False, every=False))
 
     def test_rejects_bad_timestamp(self) -> None:
         with self.assertRaises(SystemExit):
             sc.cmd_window(argparse.Namespace(
-                bundle=self.tmp, start="abc", end="2:00", force=False))
+                bundle=self.tmp, start="abc", end="2:00", force=False, every=False))
+
+
+@unittest.skipUnless(HAVE_IMAGING, "imagehash/Pillow not installed")
+class TestArtifactSelection(TempDirCase):
+    """The page must spend its 16 MB on screens, not webcam stills."""
+
+    def bundle(self, flat):
+        from PIL import Image, ImageDraw
+        dest = self.tmp / "VID"
+        (dest / "frames").mkdir(parents=True)
+        names = []
+        for i in range(len(flat)):
+            img = Image.new("RGB", (1408, 792), (18, 20, 30))
+            d = ImageDraw.Draw(img)
+            d.rectangle([60, 120, 190 + i * 60, 620], fill=(220, 220, 210))
+            n = f"{sc.hhmmss(i, sep='-')}.jpg"
+            img.save(dest / "frames" / n, "JPEG")
+            names.append(n)
+        (dest / "meta.json").write_text(json.dumps({
+            "id": "VID", "title": "T", "channel": "C", "duration": len(flat),
+            "url": "u", "fps": 1.0, "frame_count": len(flat), "chapters": [],
+            "description": "", "transcript": [],
+            "flatness": {n: flat[i] for i, n in enumerate(names)},
+            "content_threshold": sc.CONTENT_FLATNESS,
+        }), encoding="utf-8")
+        return dest
+
+    def screens(self, dest):
+        out = self.tmp / "p.html"
+        tpl = Path(__file__).resolve().parent.parent / "assets" / "artifact-template.html"
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            sc.build_artifact(dest, 0, 99, out, tpl, sc.DISPLAY_DISTANCE)
+        import re
+        m = re.search(r"^var D = (\{.*\});$", out.read_text(encoding="utf-8"),
+                      re.M | re.S)
+        return json.loads(m.group(1))["frames"]
+
+    def test_camera_frames_are_left_out_of_the_page(self) -> None:
+        got = self.screens(self.bundle([0.9, 0.01, 0.9, 0.01, 0.01, 0.9]))
+        self.assertEqual(sorted(int(f["t"]) for f in got), [0, 2, 5],
+                         "only the flat frames belong on the page")
+
+    def test_a_span_with_no_screen_still_renders(self) -> None:
+        """A conversational stretch must not produce an empty page."""
+        self.assertTrue(self.screens(self.bundle([0.01] * 6)))
+
+    def test_a_bundle_without_scores_uses_every_frame(self) -> None:
+        dest = self.bundle([0.01] * 5)
+        meta = json.loads((dest / "meta.json").read_text())
+        del meta["flatness"]
+        (dest / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        self.assertTrue(self.screens(dest))
+
+
+@unittest.skipUnless(HAVE_IMAGING, "imagehash/Pillow not installed")
+class TestDisplayDedupeIgnoresCorners(TempDirCase):
+    """Whole-frame hashing here kept 2072 of 2771 frames -> a 94 MB page."""
+
+    def frames(self, n=6):
+        from PIL import Image, ImageDraw
+        import random
+        out = []
+        for i in range(n):
+            random.seed(i)
+            img = Image.new("RGB", (1408, 792), (20, 22, 30))
+            d = ImageDraw.Draw(img)
+            d.rectangle((200, 100, 1200, 400), fill=(240, 240, 240))
+            for y in range(792 - 230, 792, 25):
+                for x in range(0, 300, 25):
+                    v = random.choice((0, 255))
+                    d.rectangle((x, y, x + 25, y + 25), fill=(v, v, v))
+            f = self.tmp / f"{sc.hhmmss(i, sep='-')}.jpg"
+            img.save(f)
+            out.append(sc.Frame(float(i), f))
+        return out
+
+    def test_corner_motion_does_not_multiply_screens(self) -> None:
+        self.assertEqual(len(sc.pick_for_display(self.frames(), sc.DISPLAY_DISTANCE)), 1)
+
+    def test_whole_frame_mode_keeps_them_all(self) -> None:
+        got = sc.pick_for_display(self.frames(), sc.DISPLAY_DISTANCE, whole=True)
+        self.assertEqual(len(got), 6)
 
 
 @unittest.skipUnless(HAVE_IMAGING, "imagehash/Pillow not installed")
@@ -1056,6 +1235,289 @@ class TestArtifact(TempDirCase):
         text = self.TEMPLATE.read_text(encoding="utf-8")
         bad = sorted({c for c in text if ord(c) > 127})
         self.assertEqual(bad, [], f"non-ASCII in template: {bad}")
+
+# --------------------------------------------------------------------------
+# Content classification: screens vs camera footage
+# --------------------------------------------------------------------------
+@unittest.skipUnless(HAVE_IMAGING, "imagehash/Pillow not installed")
+class TestFlatness(TempDirCase):
+    """Flatness separates a screen from a face. See CONTENT_FLATNESS."""
+
+    def img(self, fill):
+        from PIL import Image
+        return Image.new("RGB", (1408, 792), fill)
+
+    def test_solid_dark_is_flat(self) -> None:
+        self.assertGreater(sc.flatness(self.img((5, 5, 8))), 0.99)
+
+    def test_solid_white_is_flat(self) -> None:
+        self.assertGreater(sc.flatness(self.img((250, 250, 250))), 0.99)
+
+    def test_midtone_is_not_flat(self) -> None:
+        """Skin and walls sit in the midrange — the band flatness ignores."""
+        self.assertLess(sc.flatness(self.img((128, 120, 110))), 0.01)
+
+    def test_threshold_sits_between_them(self) -> None:
+        flat = sc.flatness(self.img((250, 250, 250)))
+        mid = sc.flatness(self.img((128, 120, 110)))
+        self.assertLess(mid, sc.CONTENT_FLATNESS < flat)
+
+    def test_hash_box_excludes_the_corners(self) -> None:
+        """A webcam parked bottom-left must fall outside the hash region."""
+        box = sc.hash_box(self.img((0, 0, 0)))
+        self.assertEqual(box.size, (int(1408 * 0.72), int(792 * 0.66)))
+
+    def test_score_frames_keys_on_filename(self) -> None:
+        from PIL import Image
+        f = self.tmp / "00-00-01.jpg"
+        Image.new("RGB", (640, 360), (250, 250, 250)).save(f)
+        scores = sc.score_frames([sc.Frame(1.0, f)])
+        self.assertIn("00-00-01.jpg", scores)
+        self.assertGreater(scores["00-00-01.jpg"], 0.9)
+
+
+@unittest.skipUnless(HAVE_IMAGING, "imagehash/Pillow not installed")
+class TestCornerMotionDedupe(TempDirCase):
+    """The regression that made dedupe a no-op on a 58-minute podcast.
+
+    A static screen with a moving webcam in the corner hashed as a new screen
+    every single frame: whole-frame phash retained 99.8% of them.
+    """
+
+    def frames(self, n=8):
+        """Static screen, webcam-shaped block noise in the bottom-left corner.
+
+        Blocks, not scattered pixels: phash downscales to 64x64 before the DCT,
+        and single pixels average away to nothing at that size.
+        """
+        from PIL import Image, ImageDraw
+        import random
+        out = []
+        for i in range(n):
+            random.seed(i)
+            im = Image.new("RGB", (1408, 792), (20, 22, 30))
+            d = ImageDraw.Draw(im)
+            d.rectangle((200, 100, 1200, 400), fill=(240, 240, 240))
+            for y in range(792 - 230, 792, 25):      # outside HASH_BOX
+                for x in range(0, 300, 25):
+                    v = random.choice((0, 255))
+                    d.rectangle((x, y, x + 25, y + 25), fill=(v, v, v))
+            p = self.tmp / f"s_{i:03d}.jpg"
+            im.save(p)
+            out.append(sc.Frame(float(i), p))
+        return out
+
+    def test_corner_motion_moves_a_whole_frame_hash(self) -> None:
+        """Measured 54-88 apart on a 256-bit hash — far past the threshold."""
+        import imagehash
+        from PIL import Image
+        a, b = self.frames(2)
+        with Image.open(a.path) as ia, Image.open(b.path) as ib:
+            d = imagehash.phash(ia, hash_size=sc.PHASH_SIZE) - imagehash.phash(
+                ib, hash_size=sc.PHASH_SIZE)
+        self.assertGreater(d, sc.PHASH_DISTANCE)
+
+    def test_corner_motion_does_not_move_a_centre_hash(self) -> None:
+        import imagehash
+        from PIL import Image
+        a, b = self.frames(2)
+        with Image.open(a.path) as ia, Image.open(b.path) as ib:
+            d = imagehash.phash(sc.hash_box(ia), hash_size=sc.PHASH_SIZE) - \
+                imagehash.phash(sc.hash_box(ib), hash_size=sc.PHASH_SIZE)
+        self.assertEqual(d, 0)
+
+    def test_whole_frame_hashing_keeps_every_frame(self) -> None:
+        kept = sc.dedupe(self.frames(), sc.PHASH_DISTANCE, whole=True)
+        self.assertEqual(len(kept), 8, "this is the 99.8%-retention bug")
+
+    def test_centre_hashing_collapses_the_static_screen(self) -> None:
+        self.assertEqual(len(sc.dedupe(self.frames(), sc.PHASH_DISTANCE)), 1)
+
+
+class TestSegments(unittest.TestCase):
+    def frames(self, times):
+        return [sc.Frame(float(t), Path(f"{sc.hhmmss(t, sep='-')}.jpg")) for t in times]
+
+    def scores(self, frames, content):
+        return {f.path.name: (0.9 if f.ts in content else 0.01) for f in frames}
+
+    def test_merges_across_a_short_gap(self) -> None:
+        fr = self.frames(range(0, 60))
+        spans = sc.segments(fr, self.scores(fr, set(range(0, 25)) | set(range(35, 60))))
+        self.assertEqual(spans, [(0, 59)])
+
+    def test_splits_on_a_long_gap(self) -> None:
+        fr = self.frames(list(range(0, 30)) + list(range(120, 150)))
+        spans = sc.segments(fr, self.scores(fr, set(range(0, 30)) | set(range(120, 150))))
+        self.assertEqual(spans, [(0, 29), (120, 149)])
+
+    def test_drops_a_run_shorter_than_the_minimum(self) -> None:
+        fr = self.frames(range(0, 10))
+        self.assertEqual(sc.segments(fr, self.scores(fr, set(range(0, 5)))), [])
+
+    def test_no_content_means_no_spans(self) -> None:
+        fr = self.frames(range(0, 60))
+        self.assertEqual(sc.segments(fr, self.scores(fr, set())), [])
+
+
+class TestDerivedSections(unittest.TestCase):
+    def test_labels_from_the_opening_words(self) -> None:
+        cues = [sc.Cue(2.0, "context engineering"), sc.Cue(6.0, "is the whole game")]
+        got = sc.derive_sections([(0, 90)], cues)
+        self.assertEqual(got[0]["title"], "context engineering is the whole game")
+        self.assertEqual((got[0]["start"], got[0]["end"]), (0, 90))
+
+    def test_silent_span_is_labelled_not_dropped(self) -> None:
+        self.assertEqual(sc.derive_sections([(0, 90)], [])[0]["title"], "(silent)")
+
+    def test_long_label_is_truncated_on_a_word(self) -> None:
+        cues = [sc.Cue(1.0, "word " * 60)]
+        title = sc.derive_sections([(0, 90)], cues)[0]["title"]
+        self.assertLessEqual(len(title), 71)
+        self.assertTrue(title.endswith("\u2026"))
+
+    def test_only_the_lead_seconds_are_used(self) -> None:
+        cues = [sc.Cue(1.0, "early"), sc.Cue(400.0, "much later")]
+        self.assertEqual(sc.derive_sections([(0, 500)], cues)[0]["title"], "early")
+
+
+class TestWindowContentFilter(TempDirCase):
+    def bundle(self, flat):
+        dest = self.tmp / "VID"
+        (dest / "frames").mkdir(parents=True)
+        frames = []
+        for ts in range(0, 5):
+            p = dest / "frames" / f"{sc.hhmmss(ts, sep='-')}.jpg"
+            p.write_bytes(b"x")
+            frames.append(p.name)
+        meta = {"id": "VID", "title": "T", "duration": 10, "transcript": [],
+                "flatness": {n: flat[i] for i, n in enumerate(frames)},
+                "content_threshold": sc.CONTENT_FLATNESS}
+        (dest / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        return dest
+
+    def emit(self, dest, **kw):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            sc.emit_window(dest, 0, 10, **kw)
+        return buf.getvalue()
+
+    @staticmethod
+    def n_frames(out):
+        """Count FRAME *lines* — the instruction header names FRAME too."""
+        return sum(1 for ln in out.splitlines() if ln.startswith("FRAME "))
+
+    def test_camera_frames_are_hidden(self) -> None:
+        out = self.emit(self.bundle([0.9, 0.01, 0.9, 0.01, 0.01]))
+        self.assertEqual(self.n_frames(out), 2)
+        self.assertIn("3 camera frames hidden", out)
+
+    def test_all_shows_every_frame(self) -> None:
+        out = self.emit(self.bundle([0.9, 0.01, 0.9, 0.01, 0.01]), every=True)
+        self.assertEqual(self.n_frames(out), 5)
+
+    def test_a_span_with_no_screen_falls_back_to_camera(self) -> None:
+        """Showing nothing reads as 'no footage', not 'no screen shared'."""
+        out = self.emit(self.bundle([0.01] * 5))
+        self.assertEqual(self.n_frames(out), 5)
+        self.assertIn("No screen was shared", out)
+
+    def test_a_bundle_without_scores_shows_everything(self) -> None:
+        dest = self.bundle([0.01] * 5)
+        meta = json.loads((dest / "meta.json").read_text())
+        del meta["flatness"]
+        (dest / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        self.assertEqual(self.n_frames(self.emit(dest)), 5)
+
+
+class TestBundleScribe(TempDirCase):
+    """BUNDLE.md is the scribe: greppable transcript with frame pointers."""
+
+    def build(self, chapters):
+        dest = self.tmp / "VID"
+        (dest / "frames").mkdir(parents=True)
+        frames, flat = [], {}
+        for ts in range(0, 40):
+            p = dest / "frames" / f"{sc.hhmmss(ts, sep='-')}.jpg"
+            p.write_bytes(b"x")
+            frames.append(sc.Frame(float(ts), p))
+            flat[p.name] = 0.9 if ts < 30 else 0.01
+        cues = [sc.Cue(1.0, "first words here"), sc.Cue(35.0, "later words")]
+        meta = {"id": "VID", "title": "T", "channel": "C", "duration": 40,
+                "url": "u", "description": "", "chapters": chapters,
+                "flatness": flat, "content_threshold": sc.CONTENT_FLATNESS,
+                "segments": [[0, 29]],
+                "transcript": [{"start": c.start, "text": c.text} for c in cues]}
+        sc.build_bundle(meta, cues, frames, dest)
+        return (dest / "BUNDLE.md").read_text(encoding="utf-8")
+
+    def test_screen_lines_point_at_frames(self) -> None:
+        text = self.build([])
+        self.assertIn("`00:00:00` FRAME frames/00-00-00.jpg", text)
+        self.assertEqual(text.count("FRAME frames/"), 30)
+
+    def test_camera_frames_get_no_pointer(self) -> None:
+        self.assertNotIn("frames/00-00-35.jpg", self.build([]))
+
+    def test_transcript_interleaves_with_frames(self) -> None:
+        text = self.build([])
+        self.assertIn("`00:00:01` first words here", text)
+
+    def test_derived_sections_when_the_author_published_none(self) -> None:
+        text = self.build([])
+        self.assertIn("Derived sections", text)
+        self.assertIn("first words here", text)
+
+    def test_real_chapters_win_over_derived(self) -> None:
+        text = self.build([{"title": "Setup", "start": 0}])
+        self.assertIn("## Chapters", text)
+        self.assertNotIn("Derived sections", text)
+
+    def test_segment_table_is_present(self) -> None:
+        self.assertIn("Screen-share segments", self.build([]))
+
+    def test_an_unclassified_bundle_still_points_at_every_frame(self) -> None:
+        """Declining to classify must not leave the scribe with no pointers."""
+        dest = self.tmp / "U"
+        (dest / "frames").mkdir(parents=True)
+        frames = []
+        for ts in range(0, 6):
+            f = dest / "frames" / f"{sc.hhmmss(ts, sep='-')}.jpg"
+            f.write_bytes(b"x")
+            frames.append(sc.Frame(float(ts), f))
+        meta = {"id": "U", "title": "T", "channel": "C", "duration": 6, "url": "u",
+                "description": "", "chapters": [], "flatness": {}, "segments": [],
+                "transcript": []}
+        sc.build_bundle(meta, [], frames, dest)
+        text = (dest / "BUNDLE.md").read_text(encoding="utf-8")
+        self.assertEqual(text.count("FRAME frames/"), 6)
+
+
+class TestSeparationGate(unittest.TestCase):
+    """A threshold is only meaningful if the frames fall into two groups.
+
+    Measured within +/-0.05 of 0.19: 0.19% of the podcast's frames, 6.89% of the
+    overlay screencast's.
+    """
+
+    def test_a_clear_valley_separates(self) -> None:
+        scores = {f"a{i}": 0.02 for i in range(500)}
+        scores.update({f"b{i}": 0.90 for i in range(500)})
+        self.assertTrue(sc.separates(scores))
+
+    def test_a_continuous_spread_does_not(self) -> None:
+        scores = {f"c{i}": i / 1000 for i in range(1000)}
+        self.assertFalse(sc.separates(scores))
+
+    def test_mass_sitting_on_the_threshold_does_not(self) -> None:
+        """The git-diagram-over-b-roll case: content lands mid-scale."""
+        scores = {f"a{i}": 0.02 for i in range(900)}
+        scores.update({f"m{i}": 0.19 for i in range(100)})
+        self.assertFalse(sc.separates(scores))
+
+    def test_empty_scores_do_not_separate(self) -> None:
+        self.assertFalse(sc.separates({}))
+
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,6 +91,46 @@ ARTIFACT_SOFT_LIMIT = 12 * 1024 * 1024   # page cap is 16 MB; leave headroom
 # distinct scenes, 0 between identical ones. 10 sits well inside that gap.
 PHASH_SIZE = 16
 PHASH_DISTANCE = 10      # hamming distance below which two frames are "the same"
+
+# Hash a centre box, not the whole frame. A screen-share layout parks webcams in
+# the corners, and a face moves every single frame, so whole-frame phash reports
+# "new screen" forever and dedupe silently no-ops. Measured on a 58-minute
+# podcast: whole-frame hashing kept 99.8% of the screen-share frames; hashing
+# this box kept 55%. The full frame is still what gets saved and read — only the
+# similarity decision ignores the corners.
+HASH_BOX = (0.14, 0.0, 0.86, 0.66)   # l, t, r, b as fractions of the frame
+
+# Camera footage and screen content separate on flatness: UI is flat white or
+# flat dark with sharp text, a face is continuous midtone. Flatness is the
+# fraction of near-white/near-black pixels in HASH_BOX.
+#
+# Measured over 3165 frames of that podcast the distribution is bimodal with an
+# empty valley — 1991 frames below 0.05, 10 frames in 0.10-0.25, 940 above — so
+# any threshold in the valley gives the same answer within 6 frames. Labelled
+# spot-checks: every real screen scored >= 0.256, every face <= 0.126.
+#
+# Edge density and colour saturation were both measured and both rejected: the
+# corner webcams contaminate every whole-frame metric, and saturation false-
+# positived on faces against pale walls.
+CONTENT_FLATNESS = 0.19
+FLAT_HI, FLAT_LO = 225, 30       # luminance bands counted as "flat"
+
+# The threshold is only meaningful when this video's frames actually fall into
+# two groups. They do not always: a tutorial that draws diagrams over blurred
+# b-roll produces one continuous spread, and cutting it anywhere hides real
+# content — a git branch diagram over a photo scored 0.14 and would have been
+# filed as camera footage. So measure the valley before trusting the cut, and
+# when it is not there, classify nothing and show every frame.
+#
+# Measured within +/-0.05 of the threshold: 0.19% of the podcast's frames, 6.89%
+# of the overlay screencast's — a 36x gap, with 2% sitting an order of magnitude
+# clear of both. Otsu's method was measured and rejected for the cut itself: it
+# picks 0.41 on the podcast, which files a hand-verified screen at 0.243 as
+# camera footage.
+VALLEY_HALF_WIDTH = 0.05
+VALLEY_MAX_OCCUPANCY = 0.02
+SEGMENT_GAP = 15                 # merge content runs separated by <= this many s
+SEGMENT_MIN = 20                 # drop runs shorter than this
 
 VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".mov", ".m4v", ".flv", ".avi")
 URL_RE = re.compile(r"https?://[^\s<>\")\]]+")
@@ -228,11 +269,75 @@ def parse_span(text: str) -> float:
 # --------------------------------------------------------------------------
 # 1. Acquisition
 # --------------------------------------------------------------------------
-def fetch(url: str, workdir: Path) -> dict:
-    """Pull the video + best available subtitle track via yt-dlp.
+def fetch_subtitles(url: str, workdir: Path, attempts: int = 3) -> bool:
+    """Fetch the subtitle track in its own pass. Never fatal.
 
-    Prefers human-authored subs, falls back to auto-generated. Caps at 1080p —
-    below that, small terminal text turns to mush and the frames become useless.
+    Subtitles are downloaded separately from the video, and a failure here is
+    warned about rather than raised, because YouTube rate-limits the caption
+    endpoint far harder than the media one: two consecutive 58-minute builds
+    died on `HTTP 429` at `_write_subtitles` — which yt-dlp runs *before* the
+    media download — and took the whole run with them. A transcript is worth
+    much less than the video it annotates, and the pipeline already handles a
+    bundle that has no cues.
+
+    Requesting three language variants of both the manual and automatic track
+    is up to six hits on that endpoint per build, so the langs are tried in
+    priority order and the first that lands wins.
+    """
+    import yt_dlp
+
+    # `en-orig` FIRST, and this order is load-bearing. YouTube publishes two
+    # English tracks on a video whose audio it auto-captions: `en-orig`
+    # ("English (Original)") is the ASR of what was actually said, and `en` is a
+    # processed/translated rendering of it. Requesting `en` first returned a
+    # paraphrase — disfluencies and `>>` speaker markers stripped, words the
+    # speaker never said inserted ("Of course"), acronyms expanded to
+    # "reinforcement learning (RL)" — 3333 cues against the original's 1980, and
+    # 10k fewer characters. A transcript that rewrites the speaker is derived
+    # evidence, which is the whole thing this tool refuses to cite.
+    # A video with author-uploaded subtitles has no `en-orig` and falls through.
+    for lang in ("en-orig", "en", "en-US"):
+        for attempt in range(attempts):
+            opts = {
+                "skip_download": True,
+                "writesubtitles": True,
+                "writeautomaticsub": True,   # fallback when no manual track exists
+                "subtitleslangs": [lang],
+                # json3 is YouTube's own format and arrives already de-duplicated.
+                # The rolling repetition is an artefact of VTT, which is built for
+                # on-screen display where lines scroll. Measured across five
+                # videos: json3 matches the VTT-plus-merge output 97.9-100%, and
+                # every difference is a residual duplicate the merge left behind.
+                "subtitlesformat": "json3/vtt",
+                "outtmpl": str(workdir / "video.%(ext)s"),
+                "quiet": True,
+                "no_warnings": True,
+                "noprogress": True,
+                "noplaylist": True,
+            }
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.extract_info(url, download=True)
+            except Exception as e:                      # noqa: BLE001
+                last = str(e).strip().splitlines()[-1] if str(e) else type(e).__name__
+                if attempt + 1 < attempts:
+                    time.sleep(2 ** attempt * 5)        # 5s, 10s
+                    continue
+                print(f"   ! subtitles ({lang}): {last}")
+                break
+            if find_subs(workdir):
+                return True
+            break
+
+    print("   ! no subtitle track downloaded — continuing without narration")
+    return False
+
+
+def fetch(url: str, workdir: Path) -> dict:
+    """Pull the video via yt-dlp, then the subtitles in a separate pass.
+
+    Caps at 1080p — below that, small terminal text turns to mush and the frames
+    become useless.
     """
     import yt_dlp
 
@@ -254,15 +359,6 @@ def fetch(url: str, workdir: Path) -> dict:
         "format_sort": ["res:1080", "+size", "+br"],
         "merge_output_format": "mp4",
         "outtmpl": str(workdir / "video.%(ext)s"),
-        "writesubtitles": True,
-        "writeautomaticsub": True,      # fallback when no manual track exists
-        "subtitleslangs": ["en", "en-US", "en-orig"],
-        # json3 is YouTube's own format and arrives already de-duplicated. The
-        # rolling repetition is an artefact of VTT, which is built for on-screen
-        # display where lines scroll. Measured across five videos: json3 matches
-        # the VTT-plus-merge output 97.9-100%, and every difference is a residual
-        # duplicate the merge left behind — it drops nothing.
-        "subtitlesformat": "json3/vtt",
         "quiet": True,
         "no_warnings": True,
         # `quiet` alone does not suppress the progress bar; it writes straight
@@ -277,6 +373,8 @@ def fetch(url: str, workdir: Path) -> dict:
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
+
+    fetch_subtitles(url, workdir)
 
     if info.get("_type") == "playlist":
         sys.exit("that URL is a playlist — pass a single video URL")
@@ -532,7 +630,31 @@ def sample_frames(video: Path, outdir: Path, fps: float,
     return [Frame((i) / fps, f) for i, f in enumerate(files)]
 
 
-def dedupe(frames: list[Frame], distance: int) -> list[Frame]:
+def hash_box(img):
+    """Crop to HASH_BOX — the region a similarity decision should look at."""
+    w, h = img.size
+    l, t, r, b = HASH_BOX
+    return img.crop((int(w * l), int(h * t), int(w * r), int(h * b)))
+
+
+def flatness(img) -> float:
+    """Fraction of near-white/near-black pixels in HASH_BOX.
+
+    High on a document, terminal or slide; low on camera footage, whose skin and
+    background tones sit in the midrange. Computed on a 320x180 downscale — the
+    ratio is a population statistic, so full resolution buys nothing and costs 10x.
+    """
+    from PIL import Image
+
+    box = hash_box(img.convert("L").resize((320, 180), Image.BILINEAR))
+    hist = box.histogram()
+    total = sum(hist)
+    if not total:
+        return 0.0
+    return (sum(hist[FLAT_HI + 1:]) + sum(hist[:FLAT_LO])) / total
+
+
+def dedupe(frames: list[Frame], distance: int, whole: bool = False) -> list[Frame]:
     """Drop frames visually identical to the last one kept.
 
     Compared against the last *kept* frame so a gradual change accumulates
@@ -540,9 +662,9 @@ def dedupe(frames: list[Frame], distance: int) -> list[Frame]:
     Comparing against the immediate predecessor would let the reference drift
     alongside the change and drop the transition entirely.
 
-    Whole-frame phash cannot exclude a moving region: a webcam overlay in the
-    corner of an otherwise static terminal defeats this completely. `--crop` is
-    the escape hatch, and cmd_build warns when retention says it happened.
+    The hash covers HASH_BOX, not the whole frame, so corner webcams cannot hold
+    every frame alive. `whole=True` restores whole-frame hashing for footage
+    where the edges are the content.
     """
     import imagehash
     from PIL import Image
@@ -551,11 +673,65 @@ def dedupe(frames: list[Frame], distance: int) -> list[Frame]:
     last_hash = None
     for f in frames:
         with Image.open(f.path) as img:
-            h = imagehash.phash(img, hash_size=PHASH_SIZE)
+            h = imagehash.phash(img if whole else hash_box(img),
+                                hash_size=PHASH_SIZE)
         if last_hash is None or (h - last_hash) > distance:
             kept.append(f)
             last_hash = h
     return kept
+
+
+def score_frames(frames: list[Frame]) -> dict[str, float]:
+    """Flatness per frame, keyed by filename. Recorded, never used to delete.
+
+    Extraction cannot know what a later read will want, so a frame the classifier
+    calls camera footage still lands on disk — `window` filters at read time and
+    `--all` overrides it there.
+    """
+    from PIL import Image
+
+    scores: dict[str, float] = {}
+    for f in frames:
+        with Image.open(f.path) as img:
+            scores[f.path.name] = round(flatness(img), 4)
+    return scores
+
+
+def separates(scores: dict[str, float], threshold: float = CONTENT_FLATNESS,
+              half_width: float = VALLEY_HALF_WIDTH,
+              max_occupancy: float = VALLEY_MAX_OCCUPANCY) -> bool:
+    """Is there a valley at the threshold, or is this one continuous spread?
+
+    Guards against the classifier's real failure mode — content drawn over
+    photographic backgrounds, which lands mid-scale and gets filed as camera
+    footage. Hiding a frame that carries payload is the one error this tool
+    cannot make, so an unclear distribution means classify nothing.
+    """
+    if not scores:
+        return False
+    near = sum(1 for v in scores.values() if abs(v - threshold) <= half_width)
+    return near / len(scores) <= max_occupancy
+
+
+def segments(frames: list[Frame], scores: dict[str, float],
+             threshold: float = CONTENT_FLATNESS,
+             gap: int = SEGMENT_GAP, minimum: int = SEGMENT_MIN
+             ) -> list[tuple[int, int]]:
+    """Contiguous spans where a screen was being shared.
+
+    This is the map a reader needs on a long video: a 58-minute podcast carries
+    22 minutes of screen across 17 spans, and naming them is the difference
+    between reading the payload and reading an hour of faces.
+    """
+    hits = sorted(int(f.ts) for f in frames
+                  if scores.get(f.path.name, 0.0) >= threshold)
+    runs: list[list[int]] = []
+    for t in hits:
+        if runs and t - runs[-1][1] <= gap:
+            runs[-1][1] = t
+        else:
+            runs.append([t, t])
+    return [(a, b) for a, b in runs if b - a >= minimum]
 
 
 def rename_by_timestamp(frames: list[Frame], outdir: Path) -> list[Frame]:
@@ -602,6 +778,25 @@ def useful_links(description: str) -> list[str]:
     return seen
 
 
+def derive_sections(spans: list[tuple[int, int]], cues: list[Cue],
+                    lead: int = 15, width: int = 70) -> list[dict]:
+    """Navigation sections for a video whose author published no chapters.
+
+    Boundaries are structural — where a screen came up — and labels are simply
+    the first words spoken over each. That is a weaker thing than a chapter and
+    is labelled as such in BUNDLE.md: it exists so a reader can find a span, not
+    so it can be quoted as the author's own outline.
+    """
+    out: list[dict] = []
+    for a, b in spans:
+        head = " ".join(c.text for c in cues if a <= c.start < a + lead).strip()
+        head = " ".join(head.split())
+        if len(head) > width:
+            head = head[:width].rsplit(" ", 1)[0] + "…"
+        out.append({"start": a, "end": b, "title": head or "(silent)"})
+    return out
+
+
 def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) -> Path:
     """Emit BUNDLE.md as a *navigation map*, not the payload.
 
@@ -640,11 +835,46 @@ def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) ->
                   "> prerequisites that appear nowhere on screen.", ""]
         lines += ["```", meta["description"].strip(), "```", ""]
 
+    spans = [tuple(s) for s in meta.get("segments", [])]
+    scores = meta.get("flatness", {})
+    thr = meta.get("content_threshold", CONTENT_FLATNESS)
+    n_content = sum(1 for v in scores.values() if v >= thr)
+
     if meta["chapters"]:
         lines += ["## Chapters", ""]
         lines += [
             f"- `{hhmmss(c['start'])}` {c['title']}" for c in meta["chapters"]
         ]
+        lines += [""]
+    elif spans:
+        lines += [
+            "## Derived sections",
+            "",
+            "> The author published no chapters. These boundaries are where a",
+            "> screen came up; the labels are the first words spoken over each.",
+            "> Navigation only — not the author's outline.",
+            "",
+        ]
+        lines += [f"- `{hhmmss(s['start'])}`-`{hhmmss(s['end'])}` {s['title']}"
+                  for s in derive_sections(spans, cues)]
+        lines += [""]
+    if spans:
+        covered = sum(b - a for a, b in spans)
+        lines += [
+            "## Screen-share segments",
+            "",
+            f"{n_content} of {len(frames)} frames show a screen rather than a "
+            f"camera — {covered // 60}m{covered % 60:02d}s across {len(spans)} "
+            f"spans. `window` reads these by default; `--all` includes the rest.",
+            "",
+            "| span | length | ~tokens |",
+            "| - | - | - |",
+        ]
+        for a, b in spans:
+            n = sum(1 for f in frames
+                    if a <= f.ts <= b and scores.get(f.path.name, 0.0) >= thr)
+            lines += [f"| `{hhmmss(a)}`-`{hhmmss(b)}` | {b - a}s | "
+                      f"{n * TOKENS_PER_FRAME // 1000}k |"]
         lines += [""]
 
     lines += [
@@ -663,11 +893,36 @@ def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) ->
         lines += [f"| `{m:02d}:00` | {buckets[m]} |" for m in sorted(buckets)]
         lines += [""]
 
-    lines += ["## Transcript", ""]
-    if cues:
-        lines += [f"`{hhmmss(c.start)}` {c.text}" for c in cues]
-    else:
-        lines += ["_No subtitle track was available for this video._"]
+    lines += [
+        "## Transcript",
+        "",
+        "> Interleaved with the frames that were on screen while each line was",
+        "> spoken. `grep FRAME` lists every frame worth reading. Frames are named",
+        "> for their timestamp, so any line here maps to `frames/HH-MM-SS.jpg`",
+        "> whether or not a FRAME line was emitted for it.",
+        "",
+    ]
+    # Said even when frames follow: "no narration at all" is a fact about the
+    # video, and the frame list below is not evidence against it.
+    if not cues:
+        lines += ["_No subtitle track was available for this video._", ""]
+    if cues or frames:
+        # Frame before cue at the same second: the screen was up, then it was
+        # talked over. A content frame with nothing said over it still gets a
+        # line — a silent screen is exactly the payload a transcript omits.
+        events: list[tuple[float, int, str]] = [
+            (c.start, 1, c.text) for c in cues
+        ]
+        # Unclassified means every frame is a candidate. Emitting only classified
+        # content here would leave a declined video with no frame pointers at
+        # all — the scribe gutted for exactly the videos we chose not to judge.
+        events += [
+            (f.ts, 0, f"FRAME frames/{f.path.name}")
+            for f in frames
+            if not scores or scores.get(f.path.name, 0.0) >= thr
+        ]
+        events.sort(key=lambda e: (e[0], e[1]))
+        lines += [f"`{hhmmss(ts)}` {payload}" for ts, _, payload in events]
     lines += [""]
 
     path = out / "BUNDLE.md"
@@ -678,7 +933,8 @@ def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) ->
 # --------------------------------------------------------------------------
 # 5. Window — read a span back at a size that fits
 # --------------------------------------------------------------------------
-def emit_window(bundle: Path, start: float, end: float, force: bool = False) -> None:
+def emit_window(bundle: Path, start: float, end: float, force: bool = False,
+                every: bool = False) -> None:
     """Print an interleaved slice: what was on screen and what was said.
 
     Frame paths are printed bare and absolute, one per line, precisely so they
@@ -701,6 +957,24 @@ def emit_window(bundle: Path, start: float, end: float, force: bool = False) -> 
         ts = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
         if start <= ts <= end:
             frames.append(Frame(ts, p.resolve()))
+
+    # Camera frames carry no payload and crowd out the ones that do. They stay on
+    # disk — this is a read-time filter, and --all turns it off. A bundle built
+    # before classification existed has no scores, and then every frame is shown.
+    scores = meta.get("flatness") or {}
+    thr = meta.get("content_threshold", CONTENT_FLATNESS)
+    dropped = 0
+    fellback = False
+    if scores and not every:
+        keep = [f for f in frames if scores.get(f.path.name, 0.0) >= thr]
+        # Never hand back an empty span. A span of pure conversation has no
+        # content frames at all, and silently showing nothing would read as "the
+        # video has no footage here" rather than "no screen was shared here".
+        if keep:
+            dropped = len(frames) - len(keep)
+            frames = keep
+        elif frames:
+            fellback = True
 
     cues = [
         Cue(c["start"], c["text"])
@@ -728,7 +1002,11 @@ def emit_window(bundle: Path, start: float, end: float, force: bool = False) -> 
     print(f"# {meta.get('title', bundle.name)} — {hhmmss(start)} to {hhmmss(end)}")
     print()
     print(f"{len(frames)} frames (~{frame_tokens // 1000}k tokens) + "
-          f"{len(cues)} cues (~{text_tokens // 1000}k tokens).")
+          f"{len(cues)} cues (~{text_tokens // 1000}k tokens)."
+          + (f" {dropped} camera frames hidden; --all shows them."
+             if dropped else "")
+          + (" No screen was shared in this span — showing camera frames."
+             if fellback else ""))
     print()
     print("Read every path under FRAME. The narration between them is what was")
     print("being said while that was on screen.")
@@ -760,8 +1038,14 @@ def frames_in_span(bundle: Path, start: float, end: float) -> list[Frame]:
     return found
 
 
-def pick_for_display(frames: list[Frame], distance: int) -> list[Frame]:
-    """Second, harsher dedupe pass, for the page rather than for reading."""
+def pick_for_display(frames: list[Frame], distance: int,
+                     whole: bool = False) -> list[Frame]:
+    """Second, harsher dedupe pass, for the page rather than for reading.
+
+    Hashes HASH_BOX for the same reason `dedupe` does: corner webcams move every
+    frame and hold every one of them alive. Whole-frame hashing here kept 2072 of
+    2771 frames on a 58-minute podcast and built a 94 MB page against a 16 MB cap.
+    """
     import imagehash
     from PIL import Image
 
@@ -769,7 +1053,8 @@ def pick_for_display(frames: list[Frame], distance: int) -> list[Frame]:
     last = None
     for f in frames:
         with Image.open(f.path) as img:
-            h = imagehash.phash(img, hash_size=PHASH_SIZE)
+            h = imagehash.phash(img if whole else hash_box(img),
+                                hash_size=PHASH_SIZE)
         if last is None or (h - last) > distance:
             kept.append(f)
             last = h
@@ -804,7 +1089,18 @@ def build_artifact(bundle: Path, start: float, end: float, out: Path,
     except json.JSONDecodeError as e:
         sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
 
-    frames = pick_for_display(frames_in_span(bundle, start, end), distance)
+    # Same read-time filter `window` applies: a page of webcam stills is bytes
+    # spent telling the reader nothing. Falls back to every frame when the span
+    # holds no screen, so a conversational stretch still renders.
+    raw = frames_in_span(bundle, start, end)
+    scores = meta.get("flatness") or {}
+    if scores:
+        thr = meta.get("content_threshold", CONTENT_FLATNESS)
+        content = [f for f in raw if scores.get(f.path.name, 0.0) >= thr]
+        if content:
+            raw = content
+
+    frames = pick_for_display(raw, distance)
     if not frames:
         sys.exit(f"no frames between {hhmmss(start)} and {hhmmss(end)}")
 
@@ -922,7 +1218,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     work = dest / "frames.new"
     try:
         raw = sample_frames(video, work, args.fps, args.crop)
-        kept = dedupe(raw, args.phash_distance)
+        kept = dedupe(raw, args.phash_distance, whole=args.whole_frame_hash)
         frames = rename_by_timestamp(kept, work)
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)   # no half-built dir survives a failure
@@ -938,13 +1234,27 @@ def cmd_build(args: argparse.Namespace) -> None:
     frames = [Frame(f.ts, dest / "frames" / f.path.name) for f in frames]
     print(f"   {len(raw)} sampled -> {len(frames)} kept after dedupe")
 
-    # Whole-frame phash cannot exclude a moving region, so a webcam overlay on an
-    # otherwise static screencast keeps every frame and dedupe silently no-ops.
+    # A run that still retains almost everything has had no dedupe at all —
+    # an animated background, or footage whose motion fills HASH_BOX.
     ratio = len(frames) / max(len(raw), 1)
-    if ratio > 0.9 and len(raw) > 60:
-        print(f"   ! dedupe kept {ratio:.0%} — a webcam overlay or animated "
-              f"background defeats whole-frame hashing.")
-        print(f"     re-run with --crop W:H:X:Y around the content, or a lower --fps.")
+    if ratio > 0.85 and len(raw) > 60:
+        print(f"   ! dedupe kept {ratio:.0%} — motion fills the hash region. "
+              f"Try a lower --fps.")
+
+    print("-> classifying frames")
+    scores = score_frames(frames)
+    spans: list[tuple[int, int]] = []
+    if separates(scores, args.content_flatness):
+        spans = segments(frames, scores, args.content_flatness)
+        n_content = sum(1 for v in scores.values() if v >= args.content_flatness)
+        print(f"   {n_content} content frames, {len(frames) - n_content} camera "
+              f"({len(spans)} screen span{'s' if len(spans) != 1 else ''})")
+    else:
+        # Recorded but not acted on: the scores stay out of meta so `window`
+        # takes its unclassified path and shows every frame.
+        scores = {}
+        print("   frames do not separate into screen and camera — "
+              "keeping all of them")
 
     # Transcript rides in meta.json so `window` needs no second parse.
     # BUNDLE.md carries its own copy for reading; both come from `cues` in this
@@ -952,6 +1262,9 @@ def cmd_build(args: argparse.Namespace) -> None:
     meta["transcript"] = [{"start": c.start, "text": c.text} for c in cues]
     meta["fps"] = args.fps
     meta["frame_count"] = len(frames)
+    meta["flatness"] = scores
+    meta["content_threshold"] = args.content_flatness
+    meta["segments"] = [[a, b] for a, b in spans]
     (dest / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     bundle = build_bundle(meta, cues, frames, dest)
@@ -969,7 +1282,7 @@ def cmd_window(args: argparse.Namespace) -> None:
     start, end = parse_span(args.start), parse_span(args.end)
     if end <= start:
         sys.exit(f"end ({args.end}) must be after start ({args.start})")
-    emit_window(resolve_bundle(args.bundle), start, end, args.force)
+    emit_window(resolve_bundle(args.bundle), start, end, args.force, args.every)
 
 
 def main() -> None:
@@ -989,6 +1302,12 @@ def main() -> None:
                    help="ffmpeg crop W:H:X:Y applied before hashing, to exclude "
                         "a webcam overlay or animated background")
     b.add_argument("--keep-video", action="store_true")
+    b.add_argument("--whole-frame-hash", action="store_true",
+                   help="hash the whole frame instead of its centre — for "
+                        "footage whose edges are the content")
+    b.add_argument("--content-flatness", type=float, default=CONTENT_FLATNESS,
+                   help=f"flatness at or above which a frame counts as a screen "
+                        f"rather than camera footage (default {CONTENT_FLATNESS})")
     b.set_defaults(func=cmd_build)
 
     w = sub.add_parser("window", help="print a span of a bundle for reading")
@@ -996,6 +1315,8 @@ def main() -> None:
                    help="bundle directory, or a bare video id under the bundle root")
     w.add_argument("start", help="SS, MM:SS, or HH:MM:SS")
     w.add_argument("end", help="SS, MM:SS, or HH:MM:SS")
+    w.add_argument("--all", dest="every", action="store_true",
+                   help="include camera frames, not just screen content")
     w.add_argument("--force", action="store_true",
                    help=f"emit even above ~{WINDOW_TOKEN_CAP // 1000}k tokens of frames")
     w.set_defaults(func=cmd_window)

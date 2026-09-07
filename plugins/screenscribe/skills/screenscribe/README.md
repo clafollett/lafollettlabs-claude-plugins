@@ -141,6 +141,7 @@ borrowing a project's existing toolchain:
 
 - `ffmpeg` on PATH
 - `yt-dlp`, `imagehash`, `pillow`
+- `curl_cffi` and `deno` — strongly recommended, see below
 
 Only the video stream is downloaded. Nothing decodes audio — frames come from
 `-vf` and the narration comes from the subtitle track — so pulling `+bestaudio`
@@ -153,10 +154,25 @@ missing Pillow surfaced only after the full download and the entire sampling
 pass.
 
 ```bash
-brew install ffmpeg          # or the platform's package manager
+brew install ffmpeg deno     # or the platform's package manager
 python3 -m venv ~/.screenscribe/venv
-~/.screenscribe/venv/bin/pip install -q yt-dlp imagehash pillow
+~/.screenscribe/venv/bin/pip install -q yt-dlp imagehash pillow curl_cffi
 ```
+
+`curl_cffi` and `deno` are not imported by this script, and `build` does not
+preflight them — yt-dlp uses them when they are present and warns when they are
+not:
+
+| Missing | yt-dlp says | Cost |
+| - | - | - |
+| `curl_cffi` | "no impersonate target is available" | requests do not match a browser's TLS fingerprint, so YouTube is likelier to rate-limit them |
+| `deno` | "extraction without a JS runtime has been deprecated" | some formats are not offered, which can defeat the 1080p selection above |
+
+Neither is required, and neither authenticates anything. Cookies
+(`--cookies-from-browser`) would make requests look like a signed-in human, but
+they attach the download to a real Google account and YouTube suspends accounts
+for automated use — the impersonation route carries no such risk, so try it
+first.
 
 The venv lives under `$HOME`, deliberately not in `~/.claude/plugins/cache/`:
 that directory holds versions side by side and gets a fresh one on every plugin
