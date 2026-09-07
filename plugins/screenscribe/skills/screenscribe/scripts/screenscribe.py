@@ -258,21 +258,66 @@ def safe_dest(root: Path, video_id: str) -> Path:
     return dest
 
 
+def matches(entry: Entry, needle: str) -> bool:
+    """Whether `needle` plausibly names this bundle.
+
+    Nobody remembers `xgkjtF89-44`. They remember "the NASA one", the channel,
+    or they still have the URL on the clipboard — so id, title, channel and URL
+    all match, case-insensitively, as substrings.
+
+    The URL case runs the other way round: `youtu.be/xgkjtF89-44` contains the
+    id rather than being contained by any field, so a long enough id is looked
+    for inside the needle too.
+    """
+    want = needle.strip().casefold()
+    if not want:
+        return False
+    fields = [str(entry.meta.get(k) or "")
+              for k in ("id", "title", "channel", "url")]
+    fields.append(entry.path.name)
+    return (any(want in f.casefold() for f in fields)
+            or (len(entry.id) >= 6 and entry.id.casefold() in want))
+
+
+def pick_one(needle: str, entries: list[Entry]) -> Entry:
+    """Exactly one bundle, or a refusal that names the candidates.
+
+    Ambiguity is never settled by taking the first hit. `prune` deletes, and a
+    guess there deletes the wrong video.
+    """
+    hits = [e for e in entries if matches(e, needle)]
+    # An exact id beats a title that happens to contain it, so a real id never
+    # turns ambiguous just because another video mentions it.
+    exact = [e for e in hits if e.id.casefold() == needle.strip().casefold()]
+    for shortlist in (exact, hits):
+        if len(shortlist) == 1:
+            return shortlist[0]
+    if len(hits) > 1:
+        sys.exit(f"{needle!r} matches {len(hits)} videos — name one:\n" +
+                 "\n".join(f"  {e.id}  {clip(e.meta.get('title') or '', 60)}"
+                            for e in hits))
+    sys.exit(f"no video matching {needle!r} — run `index` to see the library")
+
+
 def resolve_bundle(arg: Path) -> Path:
-    """Accept a path to a bundle, or a bare video id to look up in the root.
+    """A bundle directory, a bare video id, a URL, or words from the title.
 
     `window <id>` is the common case once a central library exists — the user
-    knows the video, not where the library happens to be mounted.
+    knows the video, not where the library happens to be mounted. And usually
+    not the id either, hence the fuzzy tail.
     """
     if (arg / "meta.json").is_file():
         return arg
-    candidate = bundles_root() / arg
+    root = bundles_root()
+    candidate = root / arg
     if (candidate / "meta.json").is_file():
         return candidate
-    sys.exit(
-        f"not a bundle: no meta.json at {arg} or {candidate}\n"
-        f"set ${BUNDLES_ENV} or pass the bundle directory directly"
-    )
+
+    entries = library(root)
+    if not entries:
+        sys.exit(f"not a bundle: no meta.json at {arg} or {candidate}\n"
+                 f"set ${BUNDLES_ENV} or pass the bundle directory directly")
+    return pick_one(str(arg), entries).path
 
 
 # --------------------------------------------------------------------------
@@ -1451,11 +1496,8 @@ def cmd_search(args: argparse.Namespace) -> None:
         sys.exit(f"no bundles under {root}")
 
     if args.id:
-        known = {e.id for e in entries}
-        unknown = [i for i in args.id if i not in known]
-        if unknown:
-            sys.exit(f"not in the library: {' '.join(unknown)}")
-        entries = [e for e in entries if e.id in set(args.id)]
+        wanted = {pick_one(needle, entries).id for needle in args.id}
+        entries = [e for e in entries if e.id in wanted]
 
     flags = 0 if args.case else re.IGNORECASE
     source = args.term if args.regex else re.escape(args.term)
@@ -1532,11 +1574,13 @@ def prune_targets(entries: list[Entry], args: argparse.Namespace) -> list[Entry]
 
 def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
     if args.id:
-        known = {e.id: e for e in entries}
-        unknown = [i for i in args.id if i not in known]
-        if unknown:
-            sys.exit(f"not in the library: {' '.join(unknown)}")
-        return [known[i] for i in args.id]
+        # Deduplicated by id: two needles that name the same video must not
+        # produce two rows, nor double-count the bytes they free.
+        picked: dict[str, Entry] = {}
+        for needle in args.id:
+            hit = pick_one(needle, entries)
+            picked[hit.id] = hit
+        return list(picked.values())
 
     if args.older_than is not None:
         cutoff = time.time() - args.older_than * 86400
@@ -1858,7 +1902,7 @@ def main() -> None:
 
     w = sub.add_parser("window", help="print a span of a bundle for reading")
     w.add_argument("bundle", type=Path,
-                   help="bundle directory, or a bare video id under the bundle root")
+                   help=f"video id, URL, or words from its title or channel — or a bundle directory")
     w.add_argument("start", help="SS, MM:SS, or HH:MM:SS")
     w.add_argument("end", help="SS, MM:SS, or HH:MM:SS")
     w.add_argument("--all", dest="every", action="store_true",
@@ -1869,7 +1913,7 @@ def main() -> None:
 
     a = sub.add_parser("artifact", help="build a shareable HTML page for a span")
     a.add_argument("bundle", type=Path,
-                   help="bundle directory, or a bare video id under the bundle root")
+                   help=f"video id, URL, or words from its title or channel — or a bundle directory")
     a.add_argument("start", help="SS, MM:SS, or HH:MM:SS")
     a.add_argument("end", help="SS, MM:SS, or HH:MM:SS")
     a.add_argument("-o", "--out", type=Path, default=None, help="output .html path")
@@ -1888,8 +1932,8 @@ def main() -> None:
     s_ = sub.add_parser("search", help="find a phrase across every scribe")
     s_.add_argument("term")
     s_.add_argument("--root", type=Path, default=None, help=root_help)
-    s_.add_argument("--id", action="append", default=[], metavar="ID",
-                    help="restrict to this video id (repeatable)")
+    s_.add_argument("--id", action="append", default=[], metavar="VIDEO",
+                    help=f"restrict to this video — video id, URL, or words from its title or channel (repeatable)")
     s_.add_argument("-C", "--context", type=int, default=0, metavar="N",
                     help="also print N cues either side of each hit")
     s_.add_argument("-e", "--regex", action="store_true",
@@ -1901,8 +1945,9 @@ def main() -> None:
 
     pr = sub.add_parser("prune", help="evict frames, keeping the scribe")
     pr.add_argument("--root", type=Path, default=None, help=root_help)
-    pr.add_argument("--id", action="append", default=[], metavar="ID",
-                    help="prune exactly this video id (repeatable)")
+    pr.add_argument("--id", action="append", default=[], metavar="VIDEO",
+                    help=f"prune this video — video id, URL, or words from its title or channel; ambiguity is refused, "
+                         f"never guessed (repeatable)")
     pr.add_argument("--older-than", type=float, default=None, metavar="DAYS",
                     help="prune bundles unread for this many days")
     pr.add_argument("--keep", type=int, default=None, metavar="N",

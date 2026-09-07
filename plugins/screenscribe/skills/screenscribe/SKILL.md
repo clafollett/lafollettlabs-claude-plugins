@@ -268,11 +268,33 @@ Watch: <video_id> 12:04-14:30
 
 ## Library
 
+`index` scans the bundle root. A new `build` appears in it with no bookkeeping,
+and there is no list file to keep in step.
+
 ```bash
 "$PY" "$SC" index                             # id, frames, size, last read, title
 "$PY" "$SC" search "<term>"                   # across every scribe
-"$PY" "$SC" search "<term>" -C 2 --id <id>    # with context, one video
+"$PY" "$SC" search "<term>" -C 2 --id <video> # with context, one video
 "$PY" "$SC" prune                             # prints the plan, deletes nothing
+```
+
+Every command that takes a video accepts any of these, so the user never has
+to produce an id:
+
+| They say | Pass it through |
+| - | - |
+| `xgkjtF89-44` | the id |
+| "the NASA one" | `NASA` — any words from the title |
+| "that Matt Pocock video" | `Pocock` — the channel |
+| a pasted link | the URL, in any shape |
+
+Ambiguity is refused with the candidates listed, never guessed. Resolve it by
+naming the video more precisely, or by asking the user which one.
+
+```
+if the user names a video you cannot place:
+    run index, match it yourself, and use the id
+    # do NOT ask them for an id — index is what that question is for
 ```
 
 `prune` removes bundles: frames, scribe, directory. `--frames-only` evicts just
@@ -283,7 +305,7 @@ all the disk and the video stays searchable and rebuildable from its URL.
 | - | - |
 | which video said something | `search "<term>"` |
 | what is scribed at all | `index` |
-| one video gone | `prune --id <id> --yes` |
+| one video gone | `prune --id <video> --yes` |
 | the library trimmed | `prune --yes` |
 | disk back, videos still findable | `prune --frames-only --yes` |
 
@@ -295,7 +317,7 @@ spoken. Join the two to Read it. `-` there means the frames were pruned.
 
 | Selector | Prunes |
 | - | - |
-| `--id <id>` | exactly those, repeatable |
+| `--id <video>` | exactly those, repeatable |
 | `--older-than <days>` | bundles unread for that long |
 | `--keep <n>` | all but the n most recently read |
 | `--over <size>` | least-recently-read first, until the library fits under it |

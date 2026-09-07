@@ -1702,7 +1702,7 @@ class LibraryCase(TempDirCase):
     driven without downloading anything."""
 
     def bundle(self, vid, *, frames=3, title=None, cues=(), used=None,
-               pruned=None, url=None):
+               pruned=None, url=None, channel="chan"):
         dest = self.tmp / vid
         (dest / "frames").mkdir(parents=True)
         for ts in range(frames):
@@ -1710,7 +1710,7 @@ class LibraryCase(TempDirCase):
         meta = {
             "id": vid,
             "title": title or f"title of {vid}",
-            "channel": "chan",
+            "channel": channel,
             "duration": 60,
             "url": url or f"https://example.test/{vid}",
             "transcript": [{"start": float(t), "text": txt} for t, txt in cues],
@@ -2106,6 +2106,96 @@ class TestFrameFor(unittest.TestCase):
 
     def test_no_frames_at_all(self) -> None:
         self.assertIsNone(sc.frame_for([], [], 5.0))
+
+
+class TestNamingAVideo(LibraryCase):
+    """An 11-character YouTube id is not how anyone refers to a video."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bundle("xgkjtF89-44", title="Ex-NASA dev reveals his workflow")
+        self.bundle("XV2PAHWnJN0", title="I Left 10 AI Agents Alone")
+
+    def one(self, needle):
+        return sc.pick_one(needle, sc.library(self.tmp)).id
+
+    def test_a_word_from_the_title(self) -> None:
+        self.assertEqual(self.one("NASA"), "xgkjtF89-44")
+        self.assertEqual(self.one("left 10"), "XV2PAHWnJN0")
+
+    def test_case_does_not_matter(self) -> None:
+        self.assertEqual(self.one("nasa"), "xgkjtF89-44")
+        self.assertEqual(self.one("ex-nasa"), "xgkjtF89-44")
+
+    def test_the_channel(self) -> None:
+        self.bundle("ZZZ1", title="something else", channel="Matt Pocock")
+        self.assertEqual(self.one("pocock"), "ZZZ1")
+
+    def test_a_url_in_any_shape(self) -> None:
+        """The stored URL contains the id; a short link contains it too, so the
+        match has to run in both directions."""
+        for url in ("https://example.test/xgkjtF89-44",
+                    "https://youtu.be/xgkjtF89-44",
+                    "https://www.youtube.com/watch?v=xgkjtF89-44&t=90s"):
+            self.assertEqual(self.one(url), "xgkjtF89-44", url)
+
+    def test_the_id_itself(self) -> None:
+        self.assertEqual(self.one("xgkjtF89-44"), "xgkjtF89-44")
+
+    def test_an_exact_id_beats_a_title_that_mentions_it(self) -> None:
+        """Otherwise a real id turns ambiguous because another video names it."""
+        self.bundle("ZZZ2", title="a talk about xgkjtF89-44 and its ideas")
+        self.assertEqual(self.one("xgkjtF89-44"), "xgkjtF89-44")
+
+    def test_ambiguity_is_refused_and_lists_the_candidates(self) -> None:
+        with self.assertRaises(SystemExit) as ctx:
+            self.one("e")
+        msg = str(ctx.exception)
+        self.assertIn("matches", msg)
+        self.assertIn("xgkjtF89-44", msg)
+        self.assertIn("XV2PAHWnJN0", msg)
+
+    def test_no_match_points_at_index(self) -> None:
+        with self.assertRaises(SystemExit) as ctx:
+            self.one("kubernetes")
+        self.assertIn("index", str(ctx.exception))
+
+    def test_an_empty_needle_matches_nothing(self) -> None:
+        for needle in ("", "   "):
+            with self.assertRaises(SystemExit):
+                self.one(needle)
+
+    def test_window_resolves_a_title_word(self) -> None:
+        os.environ[sc.BUNDLES_ENV] = str(self.tmp)
+        self.addCleanup(os.environ.pop, sc.BUNDLES_ENV, None)
+        self.assertEqual(sc.resolve_bundle(Path("NASA")).name, "xgkjtF89-44")
+
+    def test_a_bundle_directory_still_wins_over_any_matching(self) -> None:
+        os.environ[sc.BUNDLES_ENV] = str(self.tmp)
+        self.addCleanup(os.environ.pop, sc.BUNDLES_ENV, None)
+        direct = self.tmp / "XV2PAHWnJN0"
+        self.assertEqual(sc.resolve_bundle(direct), direct)
+
+    def test_prune_takes_a_title_word(self) -> None:
+        out = self.prune(id=["NASA"])
+        self.assertIn("xgkjtF89-44", out)
+        self.assertNotIn("XV2PAHWnJN0", out)
+
+    def test_prune_counts_one_video_once(self) -> None:
+        """Two needles naming the same video must not double-count its bytes."""
+        out = self.prune(id=["NASA", "xgkjtF89-44"])
+        self.assertIn("1 bundle,", out)
+
+    def test_prune_refuses_an_ambiguous_name_rather_than_guessing(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.prune(id=["e"], yes=True)
+        self.assertTrue((self.tmp / "xgkjtF89-44").is_dir())
+        self.assertTrue((self.tmp / "XV2PAHWnJN0").is_dir())
+
+    def test_search_takes_a_title_word(self) -> None:
+        self.bundle("QQQ", title="Q talk", cues=((0.0, "a word about oracles"),))
+        out = self.search("oracles", id=["Q talk"])
+        self.assertIn("QQQ", out)
 
 
 if __name__ == "__main__":
