@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `screenscribe` (v0.7.1, marketplace 1.27.1): `assets/spec-template.md` told an agent to re-open a cited span with `window <video_id> 12:04-14:30`, which argparse rejects — `window` takes `start` and `end` as two arguments. The hyphenated form is correct for the `Watch:` citation and wrong as a command, and the template used it for both, so every agent following it hit "the following arguments are required: end". Carried as INFO-002 since the v0.3.0 review; verified failing, then fixed.
+
 ### Removed
 - `screenscribe` (v0.7.0, marketplace 1.27.0): **`prune --frames-only` is gone.** It evicted a bundle's frames and kept its scribe, on the argument that the scribe is 0.05% of the bytes. That argument was real and beside the point: it was never asked for, and a bundle that exists as half of itself made every consumer reason about a scribe describing frames that were not there. Across two review rounds it generated five findings — a stale `BUNDLE.md` claiming a missing frame meant the screen was unchanged (MEDIUM-004), the grep path having no recovery for that state (MEDIUM-005), the `-` column over-claiming (LOW-006), a window where a crash destroyed the scribe after the frames were already deleted (R2-002), and a banner displacing the document title (R2-003). None of the machinery survives: `mark_scribe_pruned`, `pruned_note`, `PRUNED_MARK`, the `pruned` key in meta.json, `Entry.pruned`, `Entry.reclaim`, `gain()`, the zero-gain filter in `prune_targets`, the `pruned` column in `index`, and the `pruned`/`reclaimable` fields in `index --json`.
   - `prune` now has one behaviour: it removes the bundle directory. A pruned video is gone from the library and comes back by building it again.
