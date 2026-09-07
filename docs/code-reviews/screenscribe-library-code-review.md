@@ -1,6 +1,6 @@
 # Code Review: screenscribe-library
 
-**Verdict:** 🚫 BLOCKED
+**Verdict:** ✅ APPROVED (round 2; round 1 was 🚫 BLOCKED)
 
 | | |
 | - | - |
@@ -279,6 +279,89 @@ Notable in the fixes:
 
 INFO-001 is unchanged by design. INFO-002 through INFO-005 are addressed by the
 SKILL.md rewrite.
+
+---
+
+## Review Round 2
+
+**Verdict:** ✅ APPROVED
+
+| | |
+| - | - |
+| **Reviewed SHA** | `bb221b1` |
+| **Range** | `a444a63..bb221b1` (the remediation only) |
+| **Date** | 2026-09-07 |
+
+Scoped to the round-1 remediation, on the reasoning that it added roughly 200
+lines of code that nothing had reviewed — including `mark_scribe_pruned`, the
+first path outside `build` that writes to a user's scribe.
+
+`pe-governance` returned **0 HIGH, 0 MEDIUM, 1 LOW, 1 INFO — APPROVED**, having
+verified each round-1 finding discharged against the script rather than against
+the diff: the Stage 2 nested branch is reachable and `window` does emit the
+literal string it keys on; `--yes` appears exactly once in the file; the
+selector table matches `_select` in order; `PRUNE_BUDGET` really is `2G` under
+`parse_size`; the section went 72 lines to 60 while gaining three flags.
+
+The primary agent's three-pass on the Python found **three defects, all of them
+in the round-1 remediation itself.**
+
+### 🟡 R2-001 — a matching cue printed without its marker
+
+**Location:** `cmd_search` · **In scope:** yes (introduced by the LOW-002 fix)
+
+The context de-duplication keyed the `>` marker on the loop index. Two hits
+closer together than `--context` share a window, so the second was rendered as
+the first's context and lost its marker — indistinguishable from a line that
+never matched, while the footer still counted it. Reproduced: `2 hits`, one
+marker. Now keyed on membership in the match set.
+
+**The round-1 test did not catch it.** `test_adjacent_hits_do_not_repeat_their_
+context` counted occurrences and never asserted the markers — written to confirm
+the fix rather than to attack it. Replaced with two tests that assert marker
+count equals reported hit count.
+
+### 🟡 R2-002 — the only write that can lose irreplaceable data
+
+**Location:** `mark_scribe_pruned` · **In scope:** yes (new in the remediation)
+
+It overwrites `BUNDLE.md` *after* `drop()` has already deleted the frames. Every
+other `write_text` in the file creates a file whose source still exists; this one
+rewrites the artifact the design calls permanent, with nothing to fall back on.
+A partial write loses both halves. Now a temp file plus `os.replace`, with the
+deviation from the file's convention commented so it is not tidied away.
+
+### 🟢 R2-003 — the pruned banner displaced the title
+
+**Location:** `mark_scribe_pruned` · **In scope:** yes
+
+The fallback branch prepended a blockquote above the `# heading`, so a bundle
+built before the note was named no longer opened with its title. Now inserted
+after it.
+
+### 🟢 R2-004 / ℹ️ R2-005 — from `pe-governance`
+
+A `(title)`-tagged search hit legitimately prints a header with no rows, which is
+the exact shape round-1 MEDIUM-001 called confusing; now documented. The
+`index --json` comment named three of its extra fields; now names `reclaimable`
+too.
+
+### Outcome
+
+5 findings, 0 HIGH, 0 MEDIUM outstanding. 5 regression tests (244 -> 249).
+
+**Superseded in v0.7.0.** R2-002 and R2-003 were both defects in
+`mark_scribe_pruned`, which existed only to serve `--frames-only`. That mode was
+removed at the user's direction — it had never been asked for, and across the
+two rounds it generated five of the review's findings (MEDIUM-004, MEDIUM-005,
+LOW-006, R2-002, R2-003) without earning any of them back. The fixes stand in
+history; the code they fixed is gone.
+
+The round-1 verdict of 🚫 BLOCKED is cleared.
+
+**Worth recording:** every round-2 finding was in code written to fix round 1,
+and the one that mattered slipped past a test written in the same commit as the
+bug. Self-review caught none of these at the time; a second pass did.
 
 ---
 

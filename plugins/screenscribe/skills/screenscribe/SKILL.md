@@ -153,8 +153,7 @@ from, and camera frames are on disk under the same scheme with no `FRAME` line.
 
 ```
 if a timestamp has no frame on disk:
-    if frames/ is gone:  the bundle was pruned — rebuild from meta.json's url
-    else:                the screen did not change — read the nearest earlier frame
+    the screen did not change — read the nearest earlier frame
     do NOT conclude nothing was on screen
 ```
 
@@ -269,18 +268,16 @@ Watch: <video_id> 12:04-14:30
 
 ## Library
 
-The scribe is `BUNDLE.md`: the transcript with frame pointers. It survives a
-`--frames-only` prune; the frames do not.
+The scribe is `BUNDLE.md`: the transcript with frame pointers.
 
 ```bash
 "$PY" "$SC" index                           # id, frames, size, length, last read, title
-"$PY" "$SC" index --json                    # adds url, pruned, path
+"$PY" "$SC" index --json                    # adds url, pruned, reclaimable, path
 "$PY" "$SC" index --root ./bundles          # a library built with -o
 "$PY" "$SC" search "<term>"                 # every scribe, first 40 hits
 "$PY" "$SC" search "<term>" -C 2 --limit 0  # with context, all hits
 "$PY" "$SC" search "<term>" --id <video>    # one video
 "$PY" "$SC" prune                           # prints the plan, deletes nothing
-"$PY" "$SC" prune --frames-only             # keep the scribe, drop the frames
 ```
 
 `index` scans the bundle root, so a new `build` appears with no bookkeeping.
@@ -304,11 +301,11 @@ if the user names a video you cannot place:
 
 A `search` hit prints the bundle path once, then `HH:MM:SS` and
 `frames/HH-MM-SS.jpg` per line — the frame on screen when that line was spoken.
-Join the two to Read it. `-` means no frame is on disk for that cue; `index`
-says whether the bundle was pruned.
+Join the two to Read it. `-` means no frame is on disk for that cue. A bundle
+tagged `(title)` has no rows — the term matched its title, not its transcript.
 
-`prune` removes the bundle directory. `--frames-only` removes `frames/` and
-leaves the scribe searchable and rebuildable from its URL.
+`prune` removes the bundle directory: frames, scribe, meta. A pruned video is
+gone from the library and comes back only by building it again.
 
 Selector precedence, highest first. They do not combine, and it is not argument
 order:
@@ -324,8 +321,7 @@ order:
 ```
 if the user asks to free space or clean up:
     run prune, show the plan, stop
-    # --yes deletes, and the default takes the scribe too.
-    # It is the user's call, never yours to add
+    # --yes deletes the whole bundle. It is the user's call, never yours to add
 ```
 
 ## Re-watching a cited span
@@ -338,9 +334,6 @@ if asked to implement or verify a Watch-carrying item:
 
 ```
 if bundle directory is gone:
-    say so, ask for the URL, stop
-elif window says "frames pruned":
-    offer the build command it printed, stop
-# either way: do NOT work from the prose summary and call the citation
-# discharged
+    say so, offer to build it again from the URL, stop
+# do NOT work from the prose summary and call the citation discharged
 ```

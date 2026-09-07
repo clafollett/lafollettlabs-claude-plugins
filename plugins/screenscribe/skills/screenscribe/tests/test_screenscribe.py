@@ -1702,7 +1702,7 @@ class LibraryCase(TempDirCase):
     driven without downloading anything."""
 
     def bundle(self, vid, *, frames=3, title=None, cues=(), used=None,
-               pruned=None, url=None, channel="chan", scribe=False):
+               url=None, channel="chan"):
         dest = self.tmp / vid
         (dest / "frames").mkdir(parents=True)
         for ts in range(frames):
@@ -1715,12 +1715,8 @@ class LibraryCase(TempDirCase):
             "url": url or f"https://example.test/{vid}",
             "transcript": [{"start": float(t), "text": txt} for t, txt in cues],
         }
-        if pruned:
-            meta["pruned"] = pruned
         (dest / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
-        body = ["# scribe", "", "## Transcript", ""] + sc.TRANSCRIPT_NOTE \
-            if scribe else ["# scribe", ""]
-        (dest / "BUNDLE.md").write_text("\n".join(body), encoding="utf-8")
+        (dest / "BUNDLE.md").write_text("# scribe\n", encoding="utf-8")
         if used is not None:
             marker = dest / sc.USED_MARKER
             marker.touch()
@@ -1748,7 +1744,7 @@ class LibraryCase(TempDirCase):
 
     def prune(self, **kw):
         opts = dict(root=self.tmp, id=[], older_than=None, keep=None,
-                    over=None, frames_only=False, yes=False)
+                    over=None, yes=False)
         opts.update(kw)
         return self.invoke(sc.cmd_prune, **opts)
 
@@ -1806,7 +1802,7 @@ class TestLibraryScan(LibraryCase):
         d = self.bundle("AAA", frames=2)
         shutil.rmtree(d / "frames")
         (entry,) = sc.library(self.tmp)
-        self.assertEqual((entry.frames, entry.reclaim), (0, 0))
+        self.assertEqual(entry.frames, 0)
 
     def test_a_symlink_is_measured_as_a_link(self) -> None:
         """Following one out of the library would inflate the number
@@ -1819,7 +1815,7 @@ class TestLibraryScan(LibraryCase):
         except (OSError, NotImplementedError):
             self.skipTest("symlinks unavailable")
         (entry,) = sc.library(self.tmp)
-        self.assertLess(entry.reclaim, 5_000)
+        self.assertLess(entry.bytes, 5_000)
 
 
 class TestIndex(LibraryCase):
@@ -1831,13 +1827,12 @@ class TestIndex(LibraryCase):
         self.assertIn("BBB", out)
         self.assertIn("2 bundles", out)
 
-    def test_pruned_bundles_say_so(self) -> None:
+    def test_a_bundle_with_no_frames_shows_zero(self) -> None:
+        """An interrupted build, not a state prune can produce — a pruned
+        bundle is not in the library at all."""
         d = self.bundle("AAA")
         shutil.rmtree(d / "frames")
-        meta = json.loads((d / "meta.json").read_text())
-        meta["pruned"] = "2026-01-01T00:00:00Z"
-        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
-        self.assertIn("pruned", self.index())
+        self.assertRegex(self.index(), r"AAA\s+0\s")
 
     def test_empty_library_says_so_without_crashing(self) -> None:
         self.assertIn("no bundles", self.index())
@@ -1930,8 +1925,7 @@ class TestPruneSelection(LibraryCase):
         self.bundle("NEW", frames=4, used=3_000_000)
 
     def select(self, **kw):
-        opts = dict(id=[], older_than=None, keep=None, over=None,
-                    frames_only=False)
+        opts = dict(id=[], older_than=None, keep=None, over=None)
         opts.update(kw)
         return [e.id for e in sc.prune_targets(sc.library(self.tmp),
                                                argparse.Namespace(**opts))]
@@ -1962,17 +1956,8 @@ class TestPruneSelection(LibraryCase):
         with self.assertRaises(SystemExit):
             self.select(id=["NOPE"])
 
-    def test_frames_only_skips_a_bundle_already_stripped(self) -> None:
-        """It has nothing left to give: a row claiming bytes that no eviction
-        produced, and a prune that never settles on "nothing to prune"."""
-        stripped = self.bundle("GONE", frames=2, used=500_000)
-        shutil.rmtree(stripped / "frames")
-        for kw in ({"over": "1"}, {"keep": 0}, {"older_than": 1},
-                   {"id": ["GONE"]}):
-            self.assertNotIn("GONE", self.select(frames_only=True, **kw), kw)
-
-    def test_a_full_prune_still_takes_a_stripped_bundle(self) -> None:
-        """Its frames are gone, but the scribe and the directory are not."""
+    def test_a_bundle_whose_build_left_no_frames_is_still_prunable(self) -> None:
+        """An interrupted build leaves the directory; prune still takes it."""
         stripped = self.bundle("GONE", frames=2, used=500_000)
         shutil.rmtree(stripped / "frames")
         self.assertIn("GONE", self.select(id=["GONE"]))
@@ -1985,39 +1970,24 @@ class TestPruneExecution(LibraryCase):
         self.assertIn("dry run", out)
         self.assertTrue((d / "frames").is_dir())
 
-    def test_the_default_removes_the_whole_bundle(self) -> None:
-        """"Prune a scribed video" means the video leaves the library."""
+    def test_prune_removes_the_whole_bundle(self) -> None:
+        """"Prune a scribed video" means the video leaves the library —
+        frames, scribe, meta, directory. There is no half-pruned state."""
         d = self.bundle("AAA", frames=3)
         self.prune(keep=0, yes=True)
         self.assertFalse(d.exists())
-
-    def test_frames_only_keeps_the_scribe(self) -> None:
-        d = self.bundle("AAA", frames=3)
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertFalse((d / "frames").exists())
-        self.assertTrue((d / "BUNDLE.md").is_file())
-        meta = json.loads((d / "meta.json").read_text())
-        self.assertTrue(meta["pruned"])
-        self.assertEqual(meta["url"], "https://example.test/AAA")
-        self.assertEqual(meta["id"], "AAA")
 
     def test_a_half_finished_build_leaves_nothing_behind(self) -> None:
         d = self.bundle("AAA", frames=1)
         (d / "frames.new").mkdir()
         (d / "frames.old").mkdir()
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertFalse((d / "frames.new").exists())
-        self.assertFalse((d / "frames.old").exists())
+        self.prune(keep=0, yes=True)
+        self.assertFalse(d.exists())
 
-    def test_a_dry_run_of_the_destructive_default_says_what_goes(self) -> None:
+    def test_a_dry_run_says_what_goes(self) -> None:
         out = self.bundle("AAA", frames=3) and self.prune(keep=0)
-        self.assertIn("whole bundle", out)
+        self.assertIn("scribe, frames, directory", out)
         self.assertIn("dry run", out)
-
-    def test_frames_only_is_idempotent(self) -> None:
-        self.bundle("AAA", frames=3)
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertIn("nothing to evict", self.prune(keep=0, frames_only=True))
 
     def test_a_removed_bundle_leaves_the_library_empty(self) -> None:
         self.bundle("AAA", frames=3)
@@ -2053,40 +2023,6 @@ class TestPruneExecution(LibraryCase):
     def test_an_empty_library_is_an_error(self) -> None:
         with self.assertRaises(SystemExit):
             self.prune(keep=0)
-
-
-class TestPrunedBundleIsRecoverable(LibraryCase):
-    """A pruned bundle keeps the URL it was built from, so the failure names
-    the command that fixes it instead of reading as a fact about the video."""
-
-    def pruned(self):
-        d = self.bundle("AAA", frames=3, cues=((0.0, "hello"),))
-        self.prune(keep=0, frames_only=True, yes=True)
-        return d
-
-    def test_window_names_the_rebuild_command(self) -> None:
-        d = self.pruned()
-        with self.assertRaises(SystemExit) as ctx:
-            with redirect_stdout(io.StringIO()):
-                sc.emit_window(d, 0, 10)
-        self.assertIn("https://example.test/AAA", str(ctx.exception))
-        self.assertIn("build", str(ctx.exception))
-
-    def test_a_bundle_that_never_had_frames_reports_plainly(self) -> None:
-        d = self.bundle("BBB", frames=0)
-        shutil.rmtree(d / "frames")
-        with self.assertRaises(SystemExit) as ctx:
-            with redirect_stdout(io.StringIO()):
-                sc.emit_window(d, 0, 10)
-        self.assertIn("not a bundle", str(ctx.exception))
-
-    def test_reading_a_bundle_marks_it_used(self) -> None:
-        d = self.bundle("AAA", frames=2, cues=((0.0, "hi"),))
-        marker = d / sc.USED_MARKER
-        self.assertFalse(marker.exists())
-        with redirect_stdout(io.StringIO()):
-            sc.emit_window(d, 0, 10)
-        self.assertTrue(marker.is_file())
 
 
 class TestFrameStamp(unittest.TestCase):
@@ -2265,7 +2201,6 @@ class TestSizesAreLazy(LibraryCase):
         self.bundle("AAA", frames=3)
         (entry,) = sc.library(self.tmp)
         self.assertIsNone(entry._bytes)
-        self.assertIsNone(entry._reclaim)
         self.assertGreater(entry.bytes, 0)
         self.assertIsNotNone(entry._bytes)
 
@@ -2283,6 +2218,14 @@ class TestSizesAreLazy(LibraryCase):
     def test_index_still_reports_real_sizes(self) -> None:
         self.bundle("AAA", frames=3)
         self.assertNotIn("0B on disk", self.index())
+
+    def test_reading_a_bundle_marks_it_used(self) -> None:
+        d = self.bundle("AAA", frames=2, cues=((0.0, "hi"),))
+        marker = d / sc.USED_MARKER
+        self.assertFalse(marker.exists())
+        with redirect_stdout(io.StringIO()):
+            sc.emit_window(d, 0, 10)
+        self.assertTrue(marker.is_file())
 
 
 class TestClipStripsControlCharacters(unittest.TestCase):
@@ -2305,44 +2248,6 @@ class TestClipStripsControlCharacters(unittest.TestCase):
 
     def test_it_still_clips(self) -> None:
         self.assertEqual(sc.clip("abcdef", 4), "abc…")
-
-
-class TestPrunedScribeDescribesItself(LibraryCase):
-    """Round-1 MEDIUM: BUNDLE.md kept telling its reader that a missing frame
-    meant the screen was unchanged, after every frame had been evicted."""
-
-    def scribe(self, d):
-        return (d / "BUNDLE.md").read_text(encoding="utf-8")
-
-    def test_the_stale_rule_is_replaced(self) -> None:
-        d = self.bundle("AAA", frames=3, scribe=True)
-        self.assertIn("was unchanged, NOT that nothing was on screen",
-                      self.scribe(d))
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertNotIn("was unchanged, NOT that nothing was on screen",
-                         self.scribe(d))
-        self.assertIn(sc.PRUNED_MARK, self.scribe(d))
-
-    def test_it_names_the_rebuild_command(self) -> None:
-        d = self.bundle("AAA", frames=3, scribe=True)
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertIn("build https://example.test/AAA", self.scribe(d))
-
-    def test_a_scribe_without_the_known_note_gets_a_banner(self) -> None:
-        """Built before the note was named — prepend rather than stay silent."""
-        d = self.bundle("AAA", frames=3, scribe=False)
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertIn(sc.PRUNED_MARK, self.scribe(d))
-
-    def test_the_transcript_survives(self) -> None:
-        d = self.bundle("AAA", frames=3, scribe=True)
-        self.prune(keep=0, frames_only=True, yes=True)
-        self.assertIn("# scribe", self.scribe(d))
-
-    def test_a_full_prune_leaves_no_scribe_to_mark(self) -> None:
-        d = self.bundle("AAA", frames=3, scribe=True)
-        self.prune(keep=0, yes=True)
-        self.assertFalse(d.exists())
 
 
 class TestSearchOutput(LibraryCase):
@@ -2389,6 +2294,29 @@ class TestSearchOutput(LibraryCase):
         self.assertEqual(out.count("widget one"), 1)
         self.assertEqual(out.count("widget two"), 1)
         self.assertEqual(out.count("before"), 1)
+
+    def test_every_hit_keeps_its_marker_inside_shared_context(self) -> None:
+        """Two hits closer together than --context share a window. Keying the
+        marker on the loop index left the second one unmarked and
+        indistinguishable from a line that never matched — the footer said two
+        hits and only one carried `>`."""
+        self.bundle("AAA", frames=1, cues=((0.0, "before"), (1.0, "widget one"),
+                                           (2.0, "widget two"), (3.0, "after")))
+        out = self.search("widget", context=1)
+        marked = [ln for ln in out.splitlines() if ln.strip().startswith(">")]
+        self.assertEqual(len(marked), 2)
+        self.assertTrue(any("widget one" in ln for ln in marked))
+        self.assertTrue(any("widget two" in ln for ln in marked))
+        for ln in marked:
+            self.assertNotIn("before", ln)
+            self.assertNotIn("after", ln)
+
+    def test_the_marker_count_matches_the_reported_count(self) -> None:
+        self.bundle("BBB", frames=1, cues=tuple(
+            (float(t), "widget" if t % 2 else "filler") for t in range(10)))
+        out = self.search("widget", context=2)
+        marked = sum(1 for ln in out.splitlines() if ln.strip().startswith(">"))
+        self.assertIn(f"{marked} hits", out)
 
     def test_a_cue_missing_start_is_skipped_not_a_traceback(self) -> None:
         d = self.tmp / "AAA"

@@ -381,20 +381,16 @@ def frame_for(stamps: list[Frame], keys: list[float],
     return stamps[i - 1] if i else None
 
 
-def require_frames(bundle: Path, meta: dict) -> None:
-    """Stop with the rebuild command when the frames were evicted.
+def require_frames(bundle: Path) -> None:
+    """Stop before reporting an empty span as a fact about the video.
 
-    A pruned bundle keeps its scribe, so the failure is recoverable and the URL
-    to recover it with is right there in meta.json. Reporting it as "no frames
-    in that span" would instead read as a fact about the video.
+    A bundle without frames is a failed or interrupted build, not a video with
+    nothing on screen, and the two read identically once the span comes back
+    empty.
     """
-    if (bundle / "frames").is_dir():
-        return
-    when = meta.get("pruned")
-    if not when:
-        sys.exit(f"not a bundle: {bundle / 'frames'} missing")
-    sys.exit(f"frames pruned {when} — the scribe at {bundle} is still here.\n"
-             f"  rebuild them:  build {meta.get('url') or '<video url>'}")
+    if not (bundle / "frames").is_dir():
+        sys.exit(f"not a bundle: {bundle / 'frames'} missing\n"
+                 f"  rebuild it:  build {bundle.name}")
 
 
 # --------------------------------------------------------------------------
@@ -944,37 +940,6 @@ def derive_sections(spans: list[tuple[int, int]], cues: list[Cue],
     return out
 
 
-# The note BUNDLE.md carries above its transcript, and the note that replaces
-# it once the frames are gone. Named, and kept adjacent, because `prune` has to
-# find the first to swap in the second: a scribe that describes frames it no
-# longer has produces exactly the false inference this tool exists to prevent.
-TRANSCRIPT_NOTE = [
-    "> Interleaved with the frames that were on screen while each line was",
-    "> spoken. `grep FRAME` lists every frame worth reading, and a FRAME",
-    "> line's path is literal.",
-    ">",
-    "> Frames are named for the second they came from. Camera frames are on",
-    "> disk under the same scheme with no FRAME line. Seconds whose screen",
-    "> did not change have no file at all — a missing frame means the screen",
-    "> was unchanged, NOT that nothing was on screen. Read the nearest",
-    "> earlier frame.",
-    "",
-]
-
-PRUNED_MARK = "The frames of this bundle were pruned"
-
-
-def pruned_note(url: str) -> list[str]:
-    return [
-        f"> **{PRUNED_MARK}.** Every `FRAME` path below is dead, and a missing",
-        "> frame here says nothing about what was on screen — until the frames",
-        "> are rebuilt this file is a transcript, not a scribe.",
-        ">",
-        f"> Rebuild them:  `build {url}`",
-        "",
-    ]
-
-
 def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) -> Path:
     """Emit BUNDLE.md as a *navigation map*, not the payload.
 
@@ -1071,7 +1036,20 @@ def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) ->
         lines += [f"| `{m:02d}:00` | {buckets[m]} |" for m in sorted(buckets)]
         lines += [""]
 
-    lines += ["## Transcript", ""] + TRANSCRIPT_NOTE
+    lines += [
+        "## Transcript",
+        "",
+        "> Interleaved with the frames that were on screen while each line was",
+        "> spoken. `grep FRAME` lists every frame worth reading, and a FRAME",
+        "> line's path is literal.",
+        ">",
+        "> Frames are named for the second they came from. Camera frames are on",
+        "> disk under the same scheme with no FRAME line. Seconds whose screen",
+        "> did not change have no file at all — a missing frame means the screen",
+        "> was unchanged, NOT that nothing was on screen. Read the nearest",
+        "> earlier frame.",
+        "",
+    ]
     # Said even when frames follow: "no narration at all" is a fact about the
     # video, and the frame list below is not evidence against it.
     if not cues:
@@ -1119,7 +1097,7 @@ def emit_window(bundle: Path, start: float, end: float, force: bool = False,
     except json.JSONDecodeError as e:
         sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
 
-    require_frames(bundle, meta)
+    require_frames(bundle)
     touch_used(bundle)
     frames = frames_in_span(bundle, start, end)
 
@@ -1246,7 +1224,7 @@ def build_artifact(bundle: Path, start: float, end: float, out: Path,
     except json.JSONDecodeError as e:
         sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
 
-    require_frames(bundle, meta)
+    require_frames(bundle)
     touch_used(bundle)
 
     # Same read-time filter `window` applies: a page of webcam stills is bytes
@@ -1337,16 +1315,15 @@ def cmd_artifact(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------
 # 7. Library — index, search, prune
 #
-# `prune` removes bundles. A pruned video is gone from the library: frames,
-# scribe, meta, directory.
+# `prune` removes bundles, and that is the whole of it. A pruned video is gone
+# from the library: frames, scribe, meta, directory. It is re-scribed by
+# building it again.
 #
-# `--frames-only` is the other mode, and it exists because the two halves of a
-# bundle differ in size by three orders of magnitude. BUNDLE.md plus meta.json
-# is tens of kilobytes and holds the transcript, the segments and the URL the
-# bundle was built from; the frames are ~5 MB per minute. Measured across three
-# bundles: 156 KB of scribe against 300 MB of frames, 0.05%. Evicting only the
-# frames therefore reclaims essentially all of the disk while leaving the video
-# searchable and rebuildable — a cache eviction rather than a delete.
+# There was a --frames-only mode that kept the scribe and evicted the frames,
+# on the argument that the scribe is 0.05% of the bytes. It was removed: half a
+# bundle on disk meant every consumer had to reason about a bundle whose scribe
+# described frames that were not there, and it produced five review findings
+# without ever being asked for.
 # --------------------------------------------------------------------------
 PRUNE_BUDGET = 2 * 1024 ** 3        # library-wide ceiling `prune` defaults to
 # Control characters, minus the whitespace `str.split` already handles. \x1b
@@ -1360,26 +1337,21 @@ USED_MARKER = ".last_used"
 class Entry:
     """One bundle in the library, as the maintenance commands see it.
 
-    Sizes are measured lazily. `index` and `prune` need them; `search` and the
+    The size is measured lazily. `index` and `prune` need it; `search` and the
     name resolver do not, and walking every frame of every video to answer
     "which video says oracle" is the slow path nobody asked for. Measuring on
     first access keeps that off the hot path without giving any caller an Entry
-    whose byte counts are quietly zero.
+    whose byte count is quietly zero.
     """
     path: Path
     meta: dict
     used: float                          # epoch seconds, last read or last built
     _frames: int | None = None
     _bytes: int | None = None
-    _reclaim: int | None = None
 
     @property
     def id(self) -> str:
         return str(self.meta.get("id") or self.path.name)
-
-    @property
-    def pruned(self) -> bool:
-        return bool(self.meta.get("pruned"))
 
     @property
     def frames(self) -> int:
@@ -1395,14 +1367,6 @@ class Entry:
         if self._bytes is None:
             self._bytes = dir_bytes(self.path)
         return self._bytes
-
-    @property
-    def reclaim(self) -> int:
-        """What evicting the frames would give back."""
-        if self._reclaim is None:
-            d = self.path / "frames"
-            self._reclaim = dir_bytes(d) if d.is_dir() else 0
-        return self._reclaim
 
 
 def parse_size(text: str) -> int:
@@ -1531,8 +1495,6 @@ def cmd_index(args: argparse.Namespace) -> None:
             "duration": e.meta.get("duration") or 0,
             "frames": e.frames,
             "bytes": e.bytes,
-            "reclaimable": e.reclaim,
-            "pruned": e.meta.get("pruned"),
             "last_used": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(e.used)),
             "path": str(e.path),
         } for e in entries], indent=2))
@@ -1545,16 +1507,14 @@ def cmd_index(args: argparse.Namespace) -> None:
     print(f"{'ID':<12} {'FRAMES':>7} {'SIZE':>8} {'LENGTH':>8}  "
           f"{'LAST READ':<10}  TITLE")
     for e in entries:
-        count = "pruned" if e.pruned and not e.frames else str(e.frames)
-        print(f"{clip(e.id, 12):<12} {count:>7} {human(e.bytes):>8} "
+        print(f"{clip(e.id, 12):<12} {e.frames:>7} {human(e.bytes):>8} "
               f"{hhmmss(e.meta.get('duration') or 0):>8}  "
               f"{time.strftime('%Y-%m-%d', time.localtime(e.used)):<10}  "
               f"{clip(e.meta.get('title') or '', 52)}")
 
     total = sum(e.bytes for e in entries)
-    free = sum(e.reclaim for e in entries)
     print(f"\n{len(entries)} bundle{'s' if len(entries) != 1 else ''} · "
-          f"{human(total)} on disk · {human(free)} reclaimable in {root}")
+          f"{human(total)} on disk in {root}")
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -1611,6 +1571,11 @@ def cmd_search(args: argparse.Namespace) -> None:
         print(f"\n{e.id}  {clip(e.meta.get('title') or '', 66)}"
               f"{'  (title)' if title_hit and not found else ''}")
         print(f"  {e.path}")
+        # Marked by membership, not by the loop index. Two hits closer together
+        # than --context share a window, so the second one is printed as the
+        # first one's context — and keying the marker on `j == i` left it
+        # unmarked and indistinguishable from a line that never matched.
+        marks = set(found)
         last = -1                       # highest cue already printed, so that
         for i in found:                 # adjacent hits do not repeat context
             if limit is not None and shown >= limit:
@@ -1623,7 +1588,7 @@ def cmd_search(args: argparse.Namespace) -> None:
                 # `frames/NAME`, not the bare name: joined onto the bundle
                 # path printed above it, that is a path Read can open.
                 where = f"frames/{frame.path.name}" if frame else "-"
-                mark = ">" if j == i else " "
+                mark = ">" if j in marks else " "
                 print(f"  {mark} {hhmmss(float(cue['start']))}  {where:<24}  "
                       f"{clip(cue['text'], 96)}")
             last = max(last, hi - 1)
@@ -1637,11 +1602,6 @@ def cmd_search(args: argparse.Namespace) -> None:
     print("read a span:  window <id> <start> <end>")
 
 
-def gain(entry: Entry, frames_only: bool) -> int:
-    """What pruning this bundle would actually give back."""
-    return entry.reclaim if frames_only else entry.bytes
-
-
 def prune_targets(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
     """Which bundles are pruned. The selectors do not combine.
 
@@ -1649,12 +1609,7 @@ def prune_targets(entries: list[Entry], args: argparse.Namespace) -> list[Entry]
     is NOT argument order — `--keep 2 --id foo` and `--id foo --keep 2` both
     prune foo — so a command never means two things at once.
     """
-    picked = _select(entries, args)
-    # Under --frames-only, a bundle whose frames are already gone has nothing
-    # left to give: keeping it in would print a row claiming bytes that no
-    # eviction produced, and `prune --frames-only --keep 0` would never settle
-    # on "nothing to prune". A full prune always has the scribe to take.
-    return [e for e in picked if gain(e, args.frames_only)]
+    return _select(entries, args)
 
 
 def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
@@ -1680,44 +1635,13 @@ def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
     for e in reversed(entries):                 # least recently read first
         if total <= budget:
             break
-        take = gain(e, args.frames_only)
-        if not take:
-            continue                            # already stripped, nothing to take
         doomed.append(e)
-        total -= take
+        total -= e.bytes
     return doomed
 
 
-def mark_scribe_pruned(bundle: Path, url: str) -> None:
-    """Say in the scribe itself that the frames are gone.
-
-    BUNDLE.md tells its reader that a missing frame means the screen did not
-    change. True of a deduped bundle; false once the frames are evicted — and
-    the grep path reaches this file without passing `window`'s guard, so nothing
-    else would correct it. BUNDLE.md is written in exactly one other place, at
-    build time, so a bundle pruned today would otherwise keep asserting that
-    until it was rebuilt.
-    """
-    path = bundle / "BUNDLE.md"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return
-    note = "\n".join(pruned_note(url))
-    stale = "\n".join(TRANSCRIPT_NOTE)
-    if stale in text:
-        text = text.replace(stale, note, 1)
-    elif PRUNED_MARK not in text:
-        # Built before the note was named. Prepend rather than stay silent.
-        text = note + "\n" + text
-    try:
-        path.write_text(text, encoding="utf-8")
-    except OSError:
-        pass
-
-
-def drop(entry: Entry, root: Path, frames_only: bool = False) -> bool:
-    """Delete a bundle, or just its frames, having proved it is one.
+def drop(entry: Entry, root: Path) -> bool:
+    """Delete one bundle, having proved it is one.
 
     Everything here comes from `library`, which only yields real bundles. This
     is nonetheless the one command in the tool that removes data, so it
@@ -1730,18 +1654,7 @@ def drop(entry: Entry, root: Path, frames_only: bool = False) -> bool:
         print(f"   ! skipped {bundle}: not a bundle directly under {root}")
         return False
 
-    if not frames_only:
-        shutil.rmtree(bundle, ignore_errors=True)
-        return True
-
-    for name in ("frames", "frames.new", "frames.old"):
-        shutil.rmtree(bundle / name, ignore_errors=True)
-    # Written after the delete, so an interrupted prune leaves a bundle that
-    # says it still has frames rather than one that lies about not having them.
-    entry.meta["pruned"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    (bundle / "meta.json").write_text(json.dumps(entry.meta, indent=2),
-                                      encoding="utf-8")
-    mark_scribe_pruned(bundle, str(entry.meta.get("url") or "<video url>"))
+    shutil.rmtree(bundle, ignore_errors=True)
     return True
 
 
@@ -1757,29 +1670,25 @@ def cmd_prune(args: argparse.Namespace) -> None:
         sys.exit(f"no bundles under {root}")
 
     targets = prune_targets(entries, args)
-    verb = "evict" if args.frames_only else "remove"
     if not targets:
-        print(f"nothing to {verb} — {len(entries)} bundles, "
+        print(f"nothing to remove — {len(entries)} bundles, "
               f"{human(sum(e.bytes for e in entries))} on disk")
         return
 
-    freed = sum(gain(e, args.frames_only) for e in targets)
+    freed = sum(e.bytes for e in targets)
     for e in targets:
-        print(f"{verb:<6} {clip(e.id, 12):<12} {human(gain(e, args.frames_only)):>8}  "
+        print(f"remove {clip(e.id, 12):<12} {human(e.bytes):>8}  "
               f"last read {time.strftime('%Y-%m-%d', time.localtime(e.used))}  "
               f"{clip(e.meta.get('title') or '', 44)}")
-    what = ("frames only: the scribe stays, searchable and rebuildable"
-            if args.frames_only else "the whole bundle: scribe, frames, directory")
     print(f"\n{len(targets)} bundle{'s' if len(targets) != 1 else ''}, "
-          f"{human(freed)} — {what}")
+          f"{human(freed)} — scribe, frames, directory")
 
     if not args.yes:
-        print(f"dry run — nothing removed. Re-run with --yes to {verb}.")
+        print("dry run — nothing removed. Re-run with --yes to remove.")
         return
 
-    done = [e for e in targets if drop(e, root, frames_only=args.frames_only)]
-    freed = sum(gain(e, args.frames_only) for e in done)
-    print(f"{verb}d {len(done)}, freed {human(freed)}")
+    done = [e for e in targets if drop(e, root)]
+    print(f"removed {len(done)}, freed {human(sum(e.bytes for e in done))}")
 
 
 # --------------------------------------------------------------------------
@@ -2073,9 +1982,6 @@ def main() -> None:
     pr.add_argument("--over", default=None, metavar="SIZE",
                     help=f"prune least-recently-read first until the library "
                          f"fits (default {human(PRUNE_BUDGET)})")
-    pr.add_argument("--frames-only", action="store_true",
-                    help="evict the frames and keep the scribe — the video "
-                         "stays searchable and rebuildable from its URL")
     pr.add_argument("--yes", action="store_true",
                     help="actually delete; without it this is a dry run")
     pr.set_defaults(func=cmd_prune)
