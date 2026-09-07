@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import bisect
 import json
 import os
 import re
@@ -291,6 +292,64 @@ def parse_span(text: str) -> float:
     for p in parts:
         total = total * 60 + int(p)
     return total
+
+
+def frame_stamp(path: Path) -> float | None:
+    """Seconds from a frame filename, or None when it is not one.
+
+    Frames are named HH-MM-SS.jpg, with a `_N` suffix where one second yielded
+    more than one keeper. The name IS the index — there is no sidecar that can
+    fall out of sync with the directory.
+    """
+    parts = path.stem.split("_")[0].split("-")
+    if len(parts) != 3 or not all(p.isascii() and p.isdigit() for p in parts):
+        return None
+    return float(int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2]))
+
+
+def bundle_frames(bundle: Path) -> list[Frame]:
+    """Every frame on disk, in timestamp order.
+
+    One reader for the frames directory. `window`, `artifact` and `search` all
+    resolve timestamps through this: three separate copies of the same parse is
+    how the artifact filter drifted from the window filter in the first place.
+    """
+    found = []
+    for p in sorted((bundle / "frames").glob("*.jpg")):
+        ts = frame_stamp(p)
+        if ts is not None:
+            found.append(Frame(ts, p.resolve()))
+    found.sort(key=lambda f: f.ts)
+    return found
+
+
+def frame_for(stamps: list[Frame], keys: list[float],
+              ts: float) -> Frame | None:
+    """The frame that was on screen when `ts` was spoken.
+
+    The last frame sampled at or before it: frames are deduped, so a cue rarely
+    lands on one exactly, and the nearest earlier frame is the screen that was
+    still up. `keys` is `[f.ts for f in stamps]`, built once per bundle instead
+    of once per hit.
+    """
+    i = bisect.bisect_right(keys, ts)
+    return stamps[i - 1] if i else None
+
+
+def require_frames(bundle: Path, meta: dict) -> None:
+    """Stop with the rebuild command when the frames were evicted.
+
+    A pruned bundle keeps its scribe, so the failure is recoverable and the URL
+    to recover it with is right there in meta.json. Reporting it as "no frames
+    in that span" would instead read as a fact about the video.
+    """
+    if (bundle / "frames").is_dir():
+        return
+    when = meta.get("pruned")
+    if not when:
+        sys.exit(f"not a bundle: {bundle / 'frames'} missing")
+    sys.exit(f"frames pruned {when} — the scribe at {bundle} is still here.\n"
+             f"  rebuild them:  build {meta.get('url') or '<video url>'}")
 
 
 # --------------------------------------------------------------------------
@@ -997,14 +1056,9 @@ def emit_window(bundle: Path, start: float, end: float, force: bool = False,
     except json.JSONDecodeError as e:
         sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
 
-    frames = []
-    for p in sorted((bundle / "frames").glob("*.jpg")):
-        parts = p.stem.split("_")[0].split("-")
-        if len(parts) != 3 or not all(x.isdigit() for x in parts):
-            continue
-        ts = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-        if start <= ts <= end:
-            frames.append(Frame(ts, p.resolve()))
+    require_frames(bundle, meta)
+    touch_used(bundle)
+    frames = frames_in_span(bundle, start, end)
 
     # Camera frames carry no payload and crowd out the ones that do. They stay on
     # disk — this is a read-time filter, and --all turns it off. A bundle built
@@ -1075,15 +1129,7 @@ def emit_window(bundle: Path, start: float, end: float, force: bool = False,
 # 6. Artifact — a shareable page of one span
 # --------------------------------------------------------------------------
 def frames_in_span(bundle: Path, start: float, end: float) -> list[Frame]:
-    found = []
-    for p in sorted((bundle / "frames").glob("*.jpg")):
-        parts = p.stem.split("_")[0].split("-")
-        if len(parts) != 3 or not all(x.isdigit() for x in parts):
-            continue
-        ts = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-        if start <= ts <= end:
-            found.append(Frame(float(ts), p.resolve()))
-    return found
+    return [f for f in bundle_frames(bundle) if start <= f.ts <= end]
 
 
 def pick_for_display(frames: list[Frame], distance: int,
@@ -1136,6 +1182,9 @@ def build_artifact(bundle: Path, start: float, end: float, out: Path,
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         sys.exit(f"corrupt bundle: {meta_path} is not valid JSON ({e})")
+
+    require_frames(bundle, meta)
+    touch_used(bundle)
 
     # Same read-time filter `window` applies: a page of webcam stills is bytes
     # spent telling the reader nothing. Falls back to every frame when the span
@@ -1220,6 +1269,350 @@ def cmd_artifact(args: argparse.Namespace) -> None:
                                  / "assets" / "artifact-template.html")
     out = args.out or Path(f"{bundle.name}-{int(start)}-{int(end)}.html")
     build_artifact(bundle, start, end, out, template, args.display_distance)
+
+
+# --------------------------------------------------------------------------
+# 7. Library — index, search, prune
+#
+# The scribe is the artifact; the frames are a cache of it. BUNDLE.md plus
+# meta.json is tens of kilobytes and holds the transcript, the segments and the
+# URL the bundle was built from; the frames are ~5 MB per minute of video.
+# Measured across three bundles: 156 KB of scribe against 300 MB of frames,
+# 0.05%. So `prune` evicts frames and keeps everything needed to fetch them
+# again, and only `--purge` takes a scribe.
+# --------------------------------------------------------------------------
+PRUNE_BUDGET = 2 * 1024 ** 3        # library-wide ceiling `prune` defaults to
+SIZE_UNITS = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
+USED_MARKER = ".last_used"
+
+
+@dataclass
+class Entry:
+    """One bundle in the library, as the maintenance commands see it."""
+    path: Path
+    meta: dict
+    frames: int      # frames currently on disk
+    bytes: int       # everything under the bundle
+    reclaim: int     # what evicting the frames would give back
+    used: float      # epoch seconds, last read or last built
+
+    @property
+    def id(self) -> str:
+        return str(self.meta.get("id") or self.path.name)
+
+    @property
+    def pruned(self) -> bool:
+        return bool(self.meta.get("pruned"))
+
+
+def parse_size(text: str) -> int:
+    """Accept 2G, 500M, 1.5G, or a plain byte count."""
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)B?\s*", text, re.I)
+    if not m:
+        sys.exit(f"bad size {text!r} — expected 2G, 500M, or a byte count")
+    return int(float(m.group(1)) * SIZE_UNITS[m.group(2).upper()])
+
+
+def human(n: float) -> str:
+    for unit in ("B", "K", "M", "G"):
+        if n < 1024:
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}T"
+
+
+def touch_used(bundle: Path) -> None:
+    """Record that this bundle was read. Never fatal — a library on read-only
+    media still reads, and `prune` falls back to build time."""
+    try:
+        (bundle / USED_MARKER).touch()
+    except OSError:
+        pass
+
+
+def last_used(bundle: Path) -> float:
+    """When this bundle was last read, else when it was built.
+
+    `prune` evicts least-recently-used first, so a bundle nobody has opened is
+    judged on its build time rather than counting as fresh forever.
+    """
+    for candidate in (bundle / USED_MARKER, bundle / "meta.json", bundle):
+        try:
+            return candidate.stat().st_mtime
+        except OSError:
+            continue
+    return 0.0
+
+
+def dir_bytes(path: Path) -> int:
+    """Bytes on disk under `path`.
+
+    Symlinks are measured as links and never followed: a link pointing out of
+    the library would otherwise inflate the number `prune --over` acts on, and
+    a link loop would hang the walk.
+    """
+    total = 0
+    for root, _dirs, files in os.walk(path, followlinks=False):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                continue
+    return total
+
+
+def library(root: Path) -> list[Entry]:
+    """Every bundle under `root`, most recently read first.
+
+    A directory is a bundle when it holds a readable meta.json object. The root
+    also collects `_staging` from an interrupted build and whatever the file
+    manager drops in it (`.DS_Store` is a file, not a bundle) — none of that is
+    something to list, and emphatically not something to delete.
+    """
+    entries: list[Entry] = []
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return []
+    for d in children:
+        if not d.is_dir():
+            continue
+        try:
+            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(meta, dict):
+            continue
+        frames = d / "frames"
+        entries.append(Entry(
+            path=d,
+            meta=meta,
+            frames=sum(1 for _ in frames.glob("*.jpg")) if frames.is_dir() else 0,
+            bytes=dir_bytes(d),
+            reclaim=dir_bytes(frames) if frames.is_dir() else 0,
+            used=last_used(d),
+        ))
+    entries.sort(key=lambda e: e.used, reverse=True)
+    return entries
+
+
+def clip(text: str, width: int) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= width else text[:width - 1] + "…"
+
+
+def cmd_index(args: argparse.Namespace) -> None:
+    root = args.root if args.root is not None else bundles_root()
+    entries = library(root)
+
+    if args.json:
+        print(json.dumps([{
+            "id": e.id,
+            "title": e.meta.get("title"),
+            "channel": e.meta.get("channel"),
+            "url": e.meta.get("url"),
+            "duration": e.meta.get("duration") or 0,
+            "frames": e.frames,
+            "bytes": e.bytes,
+            "reclaimable": e.reclaim,
+            "pruned": e.meta.get("pruned"),
+            "last_used": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(e.used)),
+            "path": str(e.path),
+        } for e in entries], indent=2))
+        return
+
+    if not entries:
+        print(f"no bundles under {root}")
+        return
+
+    print(f"{'ID':<12} {'FRAMES':>7} {'SIZE':>8} {'LENGTH':>8}  "
+          f"{'LAST READ':<10}  TITLE")
+    for e in entries:
+        count = "pruned" if e.pruned and not e.frames else str(e.frames)
+        print(f"{clip(e.id, 12):<12} {count:>7} {human(e.bytes):>8} "
+              f"{hhmmss(e.meta.get('duration') or 0):>8}  "
+              f"{time.strftime('%Y-%m-%d', time.localtime(e.used)):<10}  "
+              f"{clip(e.meta.get('title') or '', 52)}")
+
+    total = sum(e.bytes for e in entries)
+    free = sum(e.reclaim for e in entries)
+    print(f"\n{len(entries)} bundle{'s' if len(entries) != 1 else ''} · "
+          f"{human(total)} on disk · {human(free)} reclaimable in {root}")
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    root = args.root if args.root is not None else bundles_root()
+    entries = library(root)
+    if not entries:
+        sys.exit(f"no bundles under {root}")
+
+    if args.id:
+        known = {e.id for e in entries}
+        unknown = [i for i in args.id if i not in known]
+        if unknown:
+            sys.exit(f"not in the library: {' '.join(unknown)}")
+        entries = [e for e in entries if e.id in set(args.id)]
+
+    flags = 0 if args.case else re.IGNORECASE
+    source = args.term if args.regex else re.escape(args.term)
+    try:
+        pattern = re.compile(source, flags)
+    except re.error as e:
+        sys.exit(f"bad --regex pattern {args.term!r}: {e}")
+
+    limit = args.limit if args.limit > 0 else None
+    hits = shown = searched = 0
+    for e in entries:
+        cues = [c for c in (e.meta.get("transcript") or [])
+                if isinstance(c, dict) and "text" in c]
+        found = [i for i, c in enumerate(cues) if pattern.search(str(c["text"]))]
+        title_hit = bool(pattern.search(str(e.meta.get("title") or "")))
+        if not found and not title_hit:
+            continue
+        searched += 1
+        hits += len(found)
+
+        # The frames directory is only walked for a bundle that actually
+        # matched — a library scan that stats every frame of every video to
+        # print nothing is the slow path nobody asked for.
+        stamps = bundle_frames(e.path)
+        keys = [f.ts for f in stamps]
+
+        print(f"\n{e.id}  {clip(e.meta.get('title') or '', 66)}"
+              f"{'  (title)' if title_hit and not found else ''}")
+        print(f"  {e.path}")
+        for i in found:
+            if limit is not None and shown >= limit:
+                break
+            lo = max(0, i - args.context)
+            hi = min(len(cues), i + args.context + 1)
+            for j in range(lo, hi):
+                cue = cues[j]
+                frame = frame_for(stamps, keys, float(cue["start"]))
+                # `frames/NAME`, not the bare name: joined onto the bundle
+                # path printed above it, that is a path Read can open.
+                where = f"frames/{frame.path.name}" if frame else "-"
+                mark = ">" if j == i else " "
+                print(f"  {mark} {hhmmss(float(cue['start']))}  {where:<24}  "
+                      f"{clip(cue['text'], 96)}")
+            shown += 1
+
+    if not hits and not searched:
+        print(f"no match for {args.term!r} in {len(entries)} "
+              f"bundle{'s' if len(entries) != 1 else ''}")
+        return
+
+    print(f"\n{hits} hit{'s' if hits != 1 else ''} in {searched} of "
+          f"{len(entries)} bundle{'s' if len(entries) != 1 else ''}")
+    if limit is not None and shown >= limit and hits > shown:
+        print(f"stopped at --limit {limit}; {hits - shown} more")
+    print("read a span:  window <id> <start> <end>")
+
+
+def gain(entry: Entry, purge: bool) -> int:
+    """What removing this bundle would actually give back."""
+    return entry.bytes if purge else entry.reclaim
+
+
+def prune_targets(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
+    """Which bundles lose their frames. The selectors do not combine — the
+    first one given wins, so a command never means two things at once.
+    """
+    picked = _select(entries, args)
+    # A bundle whose frames are already gone has nothing left to give. Keeping
+    # it in would print a row claiming bytes that no eviction produced, and
+    # `prune --keep 0` would never settle on "nothing to prune". `--purge`
+    # still has the scribe to take, so it is never filtered out here.
+    return [e for e in picked if gain(e, args.purge)]
+
+
+def _select(entries: list[Entry], args: argparse.Namespace) -> list[Entry]:
+    if args.id:
+        known = {e.id: e for e in entries}
+        unknown = [i for i in args.id if i not in known]
+        if unknown:
+            sys.exit(f"not in the library: {' '.join(unknown)}")
+        return [known[i] for i in args.id]
+
+    if args.older_than is not None:
+        cutoff = time.time() - args.older_than * 86400
+        return [e for e in entries if e.used < cutoff]
+
+    if args.keep is not None:
+        return entries[args.keep:]              # entries are most-recent first
+
+    budget = parse_size(args.over) if args.over else PRUNE_BUDGET
+    total = sum(e.bytes for e in entries)
+    doomed = []
+    for e in reversed(entries):                 # least recently read first
+        if total <= budget:
+            break
+        take = gain(e, args.purge)
+        if not take:
+            continue                            # already stripped, nothing to take
+        doomed.append(e)
+        total -= take
+    return doomed
+
+
+def drop(entry: Entry, root: Path, purge: bool = False) -> None:
+    """Delete inside one bundle, having proved it is one.
+
+    Everything here comes from `library`, which only yields directories holding
+    a readable meta.json. This is nonetheless the one command in the tool that
+    removes data, so it re-derives containment instead of trusting its caller.
+    """
+    bundle = entry.path.resolve()
+    if bundle.parent != root.resolve() or not (bundle / "meta.json").is_file():
+        sys.exit(f"refusing to delete {bundle}: not a bundle directly under {root}")
+
+    if purge:
+        shutil.rmtree(bundle, ignore_errors=True)
+        return
+
+    for name in ("frames", "frames.new", "frames.old"):
+        shutil.rmtree(bundle / name, ignore_errors=True)
+    # Written after the delete, so an interrupted prune leaves a bundle that
+    # says it still has frames rather than one that lies about not having them.
+    entry.meta["pruned"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    (bundle / "meta.json").write_text(json.dumps(entry.meta, indent=2),
+                                      encoding="utf-8")
+
+
+def cmd_prune(args: argparse.Namespace) -> None:
+    if args.keep is not None and args.keep < 0:
+        sys.exit("--keep must be 0 or more")
+    if args.older_than is not None and args.older_than <= 0:
+        sys.exit("--older-than must be a positive number of days")
+
+    root = args.root if args.root is not None else bundles_root()
+    entries = library(root)
+    if not entries:
+        sys.exit(f"no bundles under {root}")
+
+    targets = prune_targets(entries, args)
+    verb = "purge" if args.purge else "prune"
+    if not targets:
+        print(f"nothing to {verb} — {len(entries)} bundles, "
+              f"{human(sum(e.bytes for e in entries))} on disk")
+        return
+
+    freed = sum(gain(e, args.purge) for e in targets)
+    for e in targets:
+        print(f"{verb:<6} {clip(e.id, 12):<12} {human(gain(e, args.purge)):>8}  "
+              f"last read {time.strftime('%Y-%m-%d', time.localtime(e.used))}  "
+              f"{clip(e.meta.get('title') or '', 44)}")
+    kept = "scribe kept, frames evicted" if not args.purge else "scribe deleted too"
+    print(f"\n{len(targets)} bundle{'s' if len(targets) != 1 else ''}, "
+          f"{human(freed)} — {kept}")
+
+    if not args.yes:
+        print(f"dry run — nothing removed. Re-run with --yes to {verb}.")
+        return
+
+    for e in targets:
+        drop(e, root, purge=args.purge)
+    print(f"{verb}d {len(targets)}, freed {human(freed)}")
 
 
 # --------------------------------------------------------------------------
@@ -1479,6 +1872,44 @@ def main() -> None:
                    help=f"cull harder than the build pass (default {DISPLAY_DISTANCE})")
     a.add_argument("--template", type=Path, default=None)
     a.set_defaults(func=cmd_artifact)
+
+    root_help = (f"library root (default: ${BUNDLES_ENV}, else {DEFAULT_BUNDLES})")
+
+    i = sub.add_parser("index", help="list the scribed videos in the library")
+    i.add_argument("--root", type=Path, default=None, help=root_help)
+    i.add_argument("--json", action="store_true", help="machine-readable form")
+    i.set_defaults(func=cmd_index)
+
+    s_ = sub.add_parser("search", help="find a phrase across every scribe")
+    s_.add_argument("term")
+    s_.add_argument("--root", type=Path, default=None, help=root_help)
+    s_.add_argument("--id", action="append", default=[], metavar="ID",
+                    help="restrict to this video id (repeatable)")
+    s_.add_argument("-C", "--context", type=int, default=0, metavar="N",
+                    help="also print N cues either side of each hit")
+    s_.add_argument("-e", "--regex", action="store_true",
+                    help="read the term as a regular expression")
+    s_.add_argument("--case", action="store_true", help="match case")
+    s_.add_argument("--limit", type=int, default=40,
+                    help="stop after this many hits (0 for all, default 40)")
+    s_.set_defaults(func=cmd_search)
+
+    pr = sub.add_parser("prune", help="evict frames, keeping the scribe")
+    pr.add_argument("--root", type=Path, default=None, help=root_help)
+    pr.add_argument("--id", action="append", default=[], metavar="ID",
+                    help="prune exactly this video id (repeatable)")
+    pr.add_argument("--older-than", type=float, default=None, metavar="DAYS",
+                    help="prune bundles unread for this many days")
+    pr.add_argument("--keep", type=int, default=None, metavar="N",
+                    help="keep frames for the N most recently read, prune the rest")
+    pr.add_argument("--over", default=None, metavar="SIZE",
+                    help=f"evict least-recently-read until the library fits "
+                         f"(default {human(PRUNE_BUDGET)})")
+    pr.add_argument("--purge", action="store_true",
+                    help="delete the whole bundle, scribe included")
+    pr.add_argument("--yes", action="store_true",
+                    help="actually delete; without it this is a dry run")
+    pr.set_defaults(func=cmd_prune)
 
     args = ap.parse_args()
     args.func(args)

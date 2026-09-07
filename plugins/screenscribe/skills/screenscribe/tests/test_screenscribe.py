@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -1693,6 +1694,410 @@ class TestArtifactSafety(TempDirCase):
         html = self.build(self.bundle(transcript=((1.0, "</script><b>x</b>"),)))
         self.assertNotIn("</script><b>x</b>", html)
 
+
+
+# --------------------------------------------------------------------------
+class LibraryCase(TempDirCase):
+    """A library of hand-built bundles, so the maintenance commands can be
+    driven without downloading anything."""
+
+    def bundle(self, vid, *, frames=3, title=None, cues=(), used=None,
+               pruned=None, url=None):
+        dest = self.tmp / vid
+        (dest / "frames").mkdir(parents=True)
+        for ts in range(frames):
+            (dest / "frames" / f"{sc.hhmmss(ts, sep='-')}.jpg").write_bytes(b"x" * 100)
+        meta = {
+            "id": vid,
+            "title": title or f"title of {vid}",
+            "channel": "chan",
+            "duration": 60,
+            "url": url or f"https://example.test/{vid}",
+            "transcript": [{"start": float(t), "text": txt} for t, txt in cues],
+        }
+        if pruned:
+            meta["pruned"] = pruned
+        (dest / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        (dest / "BUNDLE.md").write_text("# scribe\n", encoding="utf-8")
+        if used is not None:
+            marker = dest / sc.USED_MARKER
+            marker.touch()
+            os.utime(marker, (used, used))
+        return dest
+
+    def invoke(self, fn, **kw):
+        """Call a cmd_* with a namespace, capturing stdout.
+
+        Not `run` — that is TestCase.run, and shadowing it makes the whole
+        class silently un-runnable."""
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            fn(argparse.Namespace(**kw))
+        return buf.getvalue()
+
+    def index(self, **kw):
+        return self.invoke(sc.cmd_index, root=self.tmp, json=False, **kw)
+
+    def search(self, term, **kw):
+        opts = dict(root=self.tmp, id=[], context=0, regex=False,
+                    case=False, limit=40)
+        opts.update(kw)
+        return self.invoke(sc.cmd_search, term=term, **opts)
+
+    def prune(self, **kw):
+        opts = dict(root=self.tmp, id=[], older_than=None, keep=None,
+                    over=None, purge=False, yes=False)
+        opts.update(kw)
+        return self.invoke(sc.cmd_prune, **opts)
+
+
+class TestSize(unittest.TestCase):
+    def test_units(self) -> None:
+        self.assertEqual(sc.parse_size("512"), 512)
+        self.assertEqual(sc.parse_size("2K"), 2048)
+        self.assertEqual(sc.parse_size("1.5G"), int(1.5 * 1024 ** 3))
+        self.assertEqual(sc.parse_size(" 4 GB "), 4 * 1024 ** 3)
+        self.assertEqual(sc.parse_size("300m"), 300 * 1024 ** 2)
+
+    def test_garbage_is_refused(self) -> None:
+        for bad in ("", "big", "2X", "-5G", "1.2.3M"):
+            with self.assertRaises(SystemExit):
+                sc.parse_size(bad)
+
+    def test_human_round_trips_readably(self) -> None:
+        self.assertEqual(sc.human(0), "0B")
+        self.assertEqual(sc.human(2048), "2.0K")
+        self.assertEqual(sc.human(3 * 1024 ** 3), "3.0G")
+
+
+class TestLibraryScan(LibraryCase):
+    def test_only_directories_with_meta_are_bundles(self) -> None:
+        """The bundle root also collects _staging and whatever Finder drops in
+        it. `.DS_Store` really is sitting in the author's library."""
+        self.bundle("AAA")
+        (self.tmp / ".DS_Store").write_bytes(b"junk")
+        (self.tmp / "_staging").mkdir()
+        (self.tmp / "notes.txt").write_text("hi")
+        self.assertEqual([e.id for e in sc.library(self.tmp)], ["AAA"])
+
+    def test_corrupt_meta_is_skipped_not_fatal(self) -> None:
+        self.bundle("AAA")
+        broken = self.tmp / "BBB"
+        broken.mkdir()
+        (broken / "meta.json").write_text("{not json", encoding="utf-8")
+        self.assertEqual([e.id for e in sc.library(self.tmp)], ["AAA"])
+
+    def test_a_json_scalar_is_not_a_bundle(self) -> None:
+        odd = self.tmp / "CCC"
+        odd.mkdir()
+        (odd / "meta.json").write_text("42", encoding="utf-8")
+        self.assertEqual(sc.library(self.tmp), [])
+
+    def test_most_recently_read_first(self) -> None:
+        self.bundle("OLD", used=1_000_000)
+        self.bundle("MID", used=2_000_000)
+        self.bundle("NEW", used=3_000_000)
+        self.assertEqual([e.id for e in sc.library(self.tmp)],
+                         ["NEW", "MID", "OLD"])
+
+    def test_missing_frames_dir_counts_zero(self) -> None:
+        d = self.bundle("AAA", frames=2)
+        shutil.rmtree(d / "frames")
+        (entry,) = sc.library(self.tmp)
+        self.assertEqual((entry.frames, entry.reclaim), (0, 0))
+
+    def test_a_symlink_is_measured_as_a_link(self) -> None:
+        """Following one out of the library would inflate the number
+        `prune --over` acts on, and a loop would hang the walk."""
+        d = self.bundle("AAA", frames=1)
+        big = self.tmp / "outside.bin"
+        big.write_bytes(b"y" * 50_000)
+        try:
+            (d / "frames" / "link.jpg").symlink_to(big)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        (entry,) = sc.library(self.tmp)
+        self.assertLess(entry.reclaim, 5_000)
+
+
+class TestIndex(LibraryCase):
+    def test_lists_every_bundle_with_a_total(self) -> None:
+        self.bundle("AAA", frames=2)
+        self.bundle("BBB", frames=5)
+        out = self.index()
+        self.assertIn("AAA", out)
+        self.assertIn("BBB", out)
+        self.assertIn("2 bundles", out)
+
+    def test_pruned_bundles_say_so(self) -> None:
+        d = self.bundle("AAA")
+        shutil.rmtree(d / "frames")
+        meta = json.loads((d / "meta.json").read_text())
+        meta["pruned"] = "2026-01-01T00:00:00Z"
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        self.assertIn("pruned", self.index())
+
+    def test_empty_library_says_so_without_crashing(self) -> None:
+        self.assertIn("no bundles", self.index())
+
+    def test_json_form_carries_the_url_to_rebuild_from(self) -> None:
+        self.bundle("AAA", frames=2)
+        rows = json.loads(self.invoke(sc.cmd_index, root=self.tmp, json=True))
+        self.assertEqual(rows[0]["id"], "AAA")
+        self.assertEqual(rows[0]["url"], "https://example.test/AAA")
+        self.assertEqual(rows[0]["frames"], 2)
+
+
+class TestSearch(LibraryCase):
+    def library(self):
+        self.bundle("AAA", frames=3, title="Alpha talk",
+                    cues=((0.0, "we tried Mermaid diagrams"),
+                          (1.5, "and then a call stack"),
+                          (2.0, "nothing to see here")))
+        self.bundle("BBB", frames=3, title="Beta talk",
+                    cues=((1.0, "no mermaid in this one"),))
+
+    def test_finds_a_phrase_across_bundles(self) -> None:
+        self.library()
+        out = self.search("mermaid")
+        self.assertIn("AAA", out)
+        self.assertIn("BBB", out)
+        self.assertIn("2 hits in 2 of 2 bundles", out)
+
+    def test_case_sensitivity_is_opt_in(self) -> None:
+        self.library()
+        self.assertIn("1 hit in 1 of 2", self.search("Mermaid", case=True))
+
+    def test_hits_name_the_frame_that_was_on_screen(self) -> None:
+        """The cue at 1.5s falls between frames, so the frame still up is the
+        one sampled at 1s — not the next one."""
+        self.library()
+        out = self.search("call stack")
+        self.assertIn("frames/00-00-01.jpg", out)
+
+    def test_a_pruned_bundle_still_searches(self) -> None:
+        self.library()
+        shutil.rmtree(self.tmp / "AAA" / "frames")
+        out = self.search("call stack")
+        self.assertIn("00:00:01", out)
+        self.assertIn(" -  ", out)
+
+    def test_restricting_to_one_id(self) -> None:
+        self.library()
+        out = self.search("mermaid", id=["BBB"])
+        self.assertIn("BBB", out)
+        self.assertNotIn("Alpha talk", out)
+
+    def test_an_unknown_id_is_an_error(self) -> None:
+        self.library()
+        with self.assertRaises(SystemExit):
+            self.search("mermaid", id=["ZZZ"])
+
+    def test_context_shows_neighbouring_cues(self) -> None:
+        self.library()
+        out = self.search("call stack", context=1)
+        self.assertIn("we tried Mermaid", out)
+        self.assertIn("nothing to see here", out)
+
+    def test_a_term_is_literal_unless_regex_is_asked_for(self) -> None:
+        self.bundle("AAA", cues=((0.0, "a.b"), (1.0, "axb")))
+        self.assertIn("1 hit", self.search("a.b"))
+        self.assertIn("2 hits", self.search("a.b", regex=True))
+
+    def test_a_broken_pattern_is_an_error_not_a_traceback(self) -> None:
+        self.library()
+        with self.assertRaises(SystemExit):
+            self.search("(unclosed", regex=True)
+
+    def test_no_match_says_so(self) -> None:
+        self.library()
+        self.assertIn("no match", self.search("kubernetes"))
+
+    def test_a_title_only_match_still_surfaces_the_bundle(self) -> None:
+        self.library()
+        out = self.search("Alpha")
+        self.assertIn("AAA", out)
+        self.assertIn("(title)", out)
+
+
+class TestPruneSelection(LibraryCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.bundle("OLD", frames=4, used=1_000_000)
+        self.bundle("MID", frames=4, used=2_000_000)
+        self.bundle("NEW", frames=4, used=3_000_000)
+
+    def select(self, **kw):
+        opts = dict(id=[], older_than=None, keep=None, over=None, purge=False)
+        opts.update(kw)
+        return [e.id for e in sc.prune_targets(sc.library(self.tmp),
+                                               argparse.Namespace(**opts))]
+
+    def test_keep_n_evicts_the_least_recently_read(self) -> None:
+        self.assertEqual(self.select(keep=1), ["MID", "OLD"])
+        self.assertEqual(self.select(keep=0), ["NEW", "MID", "OLD"])
+        self.assertEqual(self.select(keep=9), [])
+
+    def test_older_than_uses_last_read(self) -> None:
+        self.bundle("FRESH", used=time.time())
+        self.bundle("STALE", used=time.time() - 40 * 86400)
+        picked = self.select(older_than=30)
+        self.assertIn("STALE", picked)
+        self.assertNotIn("FRESH", picked)
+
+    def test_over_evicts_lru_first_and_stops_at_the_budget(self) -> None:
+        total = sum(e.bytes for e in sc.library(self.tmp))
+        self.assertEqual(self.select(over=str(total - 1)), ["OLD"])
+
+    def test_over_takes_nothing_when_the_library_already_fits(self) -> None:
+        self.assertEqual(self.select(over="10G"), [])
+
+    def test_explicit_ids_win_over_every_policy(self) -> None:
+        self.assertEqual(self.select(id=["NEW"], keep=0, over="1"), ["NEW"])
+
+    def test_an_unknown_id_is_an_error(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.select(id=["NOPE"])
+
+    def test_an_already_pruned_bundle_is_never_picked_again(self) -> None:
+        """It has nothing left to give: a row claiming bytes that no eviction
+        produced, and a `prune` that never settles on "nothing to prune"."""
+        stripped = self.bundle("GONE", frames=2, used=500_000)
+        shutil.rmtree(stripped / "frames")
+        for kw in ({"over": "1"}, {"keep": 0}, {"older_than": 1},
+                   {"id": ["GONE"]}):
+            self.assertNotIn("GONE", self.select(**kw), kw)
+
+    def test_purge_still_takes_a_stripped_bundle(self) -> None:
+        """Its frames are gone, but the scribe is still on disk."""
+        stripped = self.bundle("GONE", frames=2, used=500_000)
+        shutil.rmtree(stripped / "frames")
+        self.assertIn("GONE", self.select(id=["GONE"], purge=True))
+
+
+class TestPruneExecution(LibraryCase):
+    def test_a_dry_run_deletes_nothing(self) -> None:
+        d = self.bundle("AAA", frames=3)
+        out = self.prune(keep=0)
+        self.assertIn("dry run", out)
+        self.assertTrue((d / "frames").is_dir())
+
+    def test_yes_evicts_frames_and_keeps_the_scribe(self) -> None:
+        d = self.bundle("AAA", frames=3)
+        self.prune(keep=0, yes=True)
+        self.assertFalse((d / "frames").exists())
+        self.assertTrue((d / "BUNDLE.md").is_file())
+        meta = json.loads((d / "meta.json").read_text())
+        self.assertTrue(meta["pruned"])
+        self.assertEqual(meta["url"], "https://example.test/AAA")
+        self.assertEqual(meta["id"], "AAA")
+
+    def test_a_half_finished_build_leaves_nothing_behind(self) -> None:
+        d = self.bundle("AAA", frames=1)
+        (d / "frames.new").mkdir()
+        (d / "frames.old").mkdir()
+        self.prune(keep=0, yes=True)
+        self.assertFalse((d / "frames.new").exists())
+        self.assertFalse((d / "frames.old").exists())
+
+    def test_purge_takes_the_whole_bundle(self) -> None:
+        d = self.bundle("AAA", frames=3)
+        self.prune(keep=0, purge=True, yes=True)
+        self.assertFalse(d.exists())
+
+    def test_purge_is_never_implied(self) -> None:
+        d = self.bundle("AAA", frames=3)
+        self.prune(keep=0, yes=True)
+        self.assertTrue(d.is_dir())
+
+    def test_prune_is_idempotent(self) -> None:
+        self.bundle("AAA", frames=3)
+        self.prune(keep=0, yes=True)
+        self.assertIn("nothing to prune", self.prune(keep=0))
+
+    def test_nonsense_selectors_are_refused(self) -> None:
+        self.bundle("AAA")
+        for kw in ({"keep": -1}, {"older_than": 0}, {"older_than": -3}):
+            with self.assertRaises(SystemExit):
+                self.prune(**kw)
+
+    def test_drop_refuses_a_path_outside_the_root(self) -> None:
+        """`library` cannot produce one, but this is the only command that
+        deletes, so it re-derives containment rather than trusting a caller."""
+        d = self.bundle("AAA", frames=1)
+        (entry,) = sc.library(self.tmp)
+        with self.assertRaises(SystemExit):
+            sc.drop(entry, self.tmp / "elsewhere")
+        self.assertTrue((d / "frames").is_dir())
+
+    def test_an_empty_library_is_an_error(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.prune(keep=0)
+
+
+class TestPrunedBundleIsRecoverable(LibraryCase):
+    """A pruned bundle keeps the URL it was built from, so the failure names
+    the command that fixes it instead of reading as a fact about the video."""
+
+    def pruned(self):
+        d = self.bundle("AAA", frames=3, cues=((0.0, "hello"),))
+        self.prune(keep=0, yes=True)
+        return d
+
+    def test_window_names_the_rebuild_command(self) -> None:
+        d = self.pruned()
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stdout(io.StringIO()):
+                sc.emit_window(d, 0, 10)
+        self.assertIn("https://example.test/AAA", str(ctx.exception))
+        self.assertIn("build", str(ctx.exception))
+
+    def test_a_bundle_that_never_had_frames_reports_plainly(self) -> None:
+        d = self.bundle("BBB", frames=0)
+        shutil.rmtree(d / "frames")
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stdout(io.StringIO()):
+                sc.emit_window(d, 0, 10)
+        self.assertIn("not a bundle", str(ctx.exception))
+
+    def test_reading_a_bundle_marks_it_used(self) -> None:
+        d = self.bundle("AAA", frames=2, cues=((0.0, "hi"),))
+        marker = d / sc.USED_MARKER
+        self.assertFalse(marker.exists())
+        with redirect_stdout(io.StringIO()):
+            sc.emit_window(d, 0, 10)
+        self.assertTrue(marker.is_file())
+
+
+class TestFrameStamp(unittest.TestCase):
+    def test_names_that_are_timestamps(self) -> None:
+        self.assertEqual(sc.frame_stamp(Path("00-01-05.jpg")), 65.0)
+        self.assertEqual(sc.frame_stamp(Path("01-00-00.jpg")), 3600.0)
+        self.assertEqual(sc.frame_stamp(Path("00-00-07_2.jpg")), 7.0)
+
+    def test_names_that_are_not(self) -> None:
+        for name in ("frame.jpg", "00-01.jpg", "a-b-c.jpg", "00-01-05-9.jpg",
+                     "٠٠-٠١-٠٥.jpg"):
+            self.assertIsNone(sc.frame_stamp(Path(name)))
+
+
+class TestFrameFor(unittest.TestCase):
+    def frames(self):
+        return [sc.Frame(t, Path(f"{t}.jpg")) for t in (0.0, 10.0, 25.0)]
+
+    def test_picks_the_last_frame_at_or_before_the_cue(self) -> None:
+        fs = self.frames()
+        keys = [f.ts for f in fs]
+        self.assertEqual(sc.frame_for(fs, keys, 10.0).ts, 10.0)
+        self.assertEqual(sc.frame_for(fs, keys, 24.9).ts, 10.0)
+        self.assertEqual(sc.frame_for(fs, keys, 99.0).ts, 25.0)
+
+    def test_a_cue_before_every_frame_has_none(self) -> None:
+        fs = [sc.Frame(10.0, Path("a.jpg"))]
+        self.assertIsNone(sc.frame_for(fs, [10.0], 5.0))
+
+    def test_no_frames_at_all(self) -> None:
+        self.assertIsNone(sc.frame_for([], [], 5.0))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
   "name": "screenscribe",
   "description": "Watch a video and write down what was actually on screen — dense frame sampling with windowed read-back so Claude reads the pixels transcripts omit, then whatever artifact the work needs: spec, review, summary, or walkthrough",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "author": {
     "name": "LaFollett Labs LLC",
     "email": "cali.lafollett@gmail.com"

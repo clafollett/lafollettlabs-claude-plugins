@@ -143,6 +143,7 @@ BUNDLE=<the path on build's [done] line>   # resolves -o and $SCREENSCRIBE_BUNDL
 | Want | Do |
 | - | - |
 | a topic anywhere in the video | `grep -n -B3 -A3 '<term>' "$BUNDLE"`, then Read the frames on the hits |
+| a topic in some video, you forget which | `search "<term>"` — every scribe in the library |
 | every readable frame | `grep -n 'FRAME frames/' "$BUNDLE"` |
 | a span end to end | `window <id> <start> <end>`, then Read every `FRAME` path |
 | where the payload is | the "Screen-share segments" table at the top |
@@ -265,6 +266,47 @@ the span it came from — in any artifact, not just a spec.
 Watch: <video_id> 12:04-14:30
 ```
 
+## Library
+
+The scribe is the artifact: `BUNDLE.md` plus `meta.json`, tens of kilobytes,
+carrying the transcript and the URL it was built from. The frames are a cache of
+it at roughly 5 MB per minute of video, and `prune` evicts them without touching
+the scribe.
+
+```bash
+"$PY" "$SC" index                             # id, frames, size, last read, title
+"$PY" "$SC" search "<term>"                   # across every scribe
+"$PY" "$SC" search "<term>" -C 2 --id <id>    # with context, one video
+"$PY" "$SC" prune                             # prints the plan, deletes nothing
+```
+
+| Want | Do |
+| - | - |
+| which video said something | `search "<term>"` |
+| what is scribed at all | `index` |
+| disk back, scribes kept | `prune --yes` |
+| one video gone entirely | `prune --id <id> --purge --yes` |
+
+A `search` hit prints the bundle path once, then `HH:MM:SS` and
+`frames/HH-MM-SS.jpg` per line — the frame that was on screen when that line was
+spoken. Join the two to Read it. `-` there means the frames were pruned.
+
+`prune` selectors do not combine. The first one given wins:
+
+| Selector | Prunes |
+| - | - |
+| `--id <id>` | exactly those, repeatable |
+| `--older-than <days>` | bundles unread for that long |
+| `--keep <n>` | all but the n most recently read |
+| `--over <size>` | least-recently-read first, until the library fits under it |
+| none of them | as `--over 2G` |
+
+```
+if the user asks to free space or clean up:
+    run prune, show the plan, stop
+    # --yes deletes. It is the user's call, never yours to add
+```
+
 ## Re-watching a cited span
 
 ```
@@ -276,5 +318,7 @@ if asked to implement or verify a Watch-carrying item:
 ```
 if bundle directory is gone:
     say so, ask for the URL, stop
+elif window says "frames pruned":
+    offer the build command it printed, stop
     # do NOT work from the prose summary and call the citation discharged
 ```

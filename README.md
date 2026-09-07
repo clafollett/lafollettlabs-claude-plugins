@@ -65,6 +65,7 @@ Automates the watching and the scribing. Transcripts are the wrong artifact for 
 - **Scribe** — write down what was on screen, verbatim where it matters, anchored to timestamps
 - **Emit** — whatever you asked for: a spec, a review of the video, a summary, or the commands actually run
 - Every artifact cites `Watch:` spans, so a later session re-opens the source instead of trusting a summary
+- **Library** — `index`, `search` across every scribe, and `prune` to evict frames while keeping the scribe and the URL to rebuild them from
 - Works without a video — skip to emit to author a spec from a plain idea
 - Requires `ffmpeg` plus `yt-dlp`, `imagehash`, `pillow` — checked before anything downloads
 
