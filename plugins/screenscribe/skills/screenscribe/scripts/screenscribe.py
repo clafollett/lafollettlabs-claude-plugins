@@ -241,6 +241,17 @@ def fetch(url: str, workdir: Path) -> dict:
         # the narration comes from the subtitle track — so pulling +bestaudio
         # downloaded roughly a quarter of the bytes to throw them away.
         "format": "bestvideo[height<=1080]/best[height<=1080]",
+        # Resolution is load-bearing; bitrate is not. Frames are scaled to
+        # FRAME_WIDTH, so a 1920-wide source is downscaled — a low-pass filter
+        # that discards exactly the detail a high bitrate buys — while a
+        # 1280-wide source is UPSCALED and small text turns to mush. Measured on
+        # a 1080p screen-share: av01 at 587 MB and YouTube's premium vp9 at over
+        # 1 GB are character-for-character identical after the pipeline, and
+        # 720p loses the filename and the test output entirely.
+        #
+        # So: prefer the resolution, then the smallest encode of it. `bestvideo`
+        # alone picked the premium stream and paid ~40% more for nothing.
+        "format_sort": ["res:1080", "+size", "+br"],
         "merge_output_format": "mp4",
         "outtmpl": str(workdir / "video.%(ext)s"),
         "writesubtitles": True,

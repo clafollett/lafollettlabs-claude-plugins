@@ -44,6 +44,17 @@ and is dense enough to catch a command between being typed and scrolling away.
 megapixels, so 1408×792 (1.12 MP, ~1487 tokens) is the widest frame whose pixels
 survive the trip. 1568 and 1920 cost more bytes and arrive identical.
 
+**Source resolution is load-bearing; source bitrate is not.** Because frames are
+scaled to 1408, a 1920-wide source is downscaled — a low-pass filter that
+discards exactly the high-frequency detail bitrate buys — while a 1280-wide
+source is *upscaled*, inventing pixels that were never there. Measured on a
+1080p screen-share containing a diagram with near-sub-pixel labels: av01 at
+587 MB and YouTube's premium vp9 at over 1 GB are character-for-character
+identical after the pipeline, and 720p loses the filename and the test output
+entirely. So `format_sort` takes the resolution first and then the smallest
+encode of it; `bestvideo` alone was picking the premium stream and paying ~40%
+more for nothing.
+
 **JPEG, not PNG.** Measured on h264-sourced frames of dense terminal text:
 SSIM 0.995, PSNR 42.7 dB against lossless, and both crops read identically.
 Token cost is set by pixel dimensions, not file size, so PNG's 2.8× disk buys
@@ -213,10 +224,16 @@ explicit `-o` bundle is never shadowed.
 into a shipped product without a licensed transcript or video source.
 
 Disk scales with how much the frame actually changes, so it varies a lot by
-production style. A 7.4-minute tutorial with a live webcam behind a translucent
-terminal kept 312 of 444 sampled frames (70%) and ran 30 MB — roughly 240 MB per
-hour. A static screencast dedupes far harder. Budget for the worst case;
-`bundles/` is gitignored.
+production style. Two measured points: a 7.4-minute tutorial with a live webcam
+behind a translucent terminal kept 312 of 444 frames (70%) and ran 30 MB; a
+58-minute interview with two face cams kept 3165 of 3517 (90%) and ran 245 MB.
+Talking heads are the worst case — every frame differs perceptually while
+carrying no payload.
+
+Peak transient disk is higher than the bundle, and higher than first documented.
+The 58-minute video downloaded over 1 GB before sampling, because `bestvideo`
+selected YouTube's premium stream. With the format sort below it is 587 MB, and
+peak is that plus the pre-dedupe frames.
 
 ## Without a video
 

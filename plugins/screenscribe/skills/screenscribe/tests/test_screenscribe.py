@@ -348,6 +348,15 @@ class TestFetchOptions(unittest.TestCase):
     def test_caps_at_1080p(self) -> None:
         self.assertIn("height<=1080", self.opts()["format"])
 
+    def test_prefers_the_smallest_1080p_encode(self) -> None:
+        """Resolution is load-bearing (1280-wide sources get upscaled to
+        FRAME_WIDTH and small text mushes); bitrate is not. `bestvideo` alone
+        picked YouTube's premium stream and paid ~40% more for pixels that are
+        identical after the pipeline."""
+        sort = self.opts()["format_sort"]
+        self.assertEqual(sort[0], "res:1080", "resolution must outrank size")
+        self.assertIn("+size", sort)
+
     def test_prefers_json3_over_vtt(self) -> None:
         """json3 is YouTube's own format and arrives already de-duplicated; the
         rolling repetition is an artefact of VTT's scrolling display model."""
