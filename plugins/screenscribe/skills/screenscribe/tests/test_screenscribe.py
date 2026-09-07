@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -1517,6 +1517,84 @@ class TestSeparationGate(unittest.TestCase):
 
     def test_empty_scores_do_not_separate(self) -> None:
         self.assertFalse(sc.separates({}))
+
+
+
+class TestBootstrap(TempDirCase):
+    """A fresh plugin install has no venv and no third-party packages.
+
+    `bootstrap` runs on a bare system python3, so it may import only the
+    standard library, and it prints exactly one thing on stdout — the
+    interpreter path a caller binds with PY=$(... bootstrap).
+    """
+
+    def test_venv_python_path(self) -> None:
+        got = sc.venv_python(Path("/x/venv"))
+        self.assertEqual(got.parent.name, "Scripts" if os.name == "nt" else "bin")
+        self.assertEqual(got.parent.parent, Path("/x/venv"))
+
+    def test_missing_modules_names_what_is_absent(self) -> None:
+        got = sc.missing_modules(Path(sys.executable), ["json", "nope_not_real_xyz"])
+        self.assertEqual(got, ["nope_not_real_xyz"])
+
+    def test_missing_modules_on_a_dead_interpreter_reports_everything(self) -> None:
+        """A venv that failed to build must not read as fully provisioned."""
+        got = sc.missing_modules(self.tmp / "nope" / "python", ["json", "os"])
+        self.assertEqual(got, ["json", "os"])
+
+    def fake_venv(self):
+        venv = self.tmp / "v"
+        py = sc.venv_python(venv)
+        py.parent.mkdir(parents=True)
+        py.write_text("#!/bin/sh\n")
+        py.chmod(0o755)
+        return venv, py
+
+    def test_stdout_carries_only_the_interpreter_path(self) -> None:
+        """A pip upgrade notice leaking into stdout would corrupt $PY."""
+        venv, py = self.fake_venv()
+        real = sc.missing_modules
+        sc.missing_modules = lambda *a, **k: []
+        self.addCleanup(setattr, sc, "missing_modules", real)
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            sc.cmd_bootstrap(argparse.Namespace(venv=str(venv)))
+        self.assertEqual(buf.getvalue().strip(), str(py))
+
+    def test_an_existing_venv_is_not_rebuilt(self) -> None:
+        venv, py = self.fake_venv()
+        marker = py.read_text()
+        real = sc.missing_modules
+        sc.missing_modules = lambda *a, **k: []
+        self.addCleanup(setattr, sc, "missing_modules", real)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            sc.cmd_bootstrap(argparse.Namespace(venv=str(venv)))
+        self.assertEqual(py.read_text(), marker, "venv was recreated")
+
+    def test_a_still_missing_required_package_fails_loudly(self) -> None:
+        venv, _ = self.fake_venv()
+        real, run = sc.missing_modules, sc.subprocess.run
+        sc.missing_modules = lambda p, names: [n for n in names if n in sc.REQUIRED_DEPS]
+        sc.subprocess.run = lambda *a, **k: argparse.Namespace(returncode=0)
+        self.addCleanup(setattr, sc, "missing_modules", real)
+        self.addCleanup(setattr, sc.subprocess, "run", run)
+        with self.assertRaises(SystemExit) as cm, \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            sc.cmd_bootstrap(argparse.Namespace(venv=str(venv)))
+        self.assertIn("still missing", str(cm.exception))
+
+    def test_an_optional_package_does_not_fail_the_bootstrap(self) -> None:
+        """curl_cffi may not build everywhere; that must not block a build."""
+        venv, py = self.fake_venv()
+        real, run = sc.missing_modules, sc.subprocess.run
+        sc.missing_modules = lambda p, names: [n for n in names if n in sc.OPTIONAL_DEPS]
+        sc.subprocess.run = lambda *a, **k: argparse.Namespace(returncode=0)
+        self.addCleanup(setattr, sc, "missing_modules", real)
+        self.addCleanup(setattr, sc.subprocess, "run", run)
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            sc.cmd_bootstrap(argparse.Namespace(venv=str(venv)))
+        self.assertEqual(buf.getvalue().strip(), str(py))
 
 
 

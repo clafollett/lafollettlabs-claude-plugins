@@ -164,6 +164,17 @@ LINK_NOISE = (
 BUNDLES_ENV = "SCREENSCRIBE_BUNDLES"
 DEFAULT_BUNDLES = Path("~/.screenscribe/bundles")
 
+# The runtime venv, and the packages that go in it. Never inside
+# ~/.claude/plugins/cache/ — that directory is replaced on every plugin update.
+#
+# Import name -> pip name, because three of the four differ. REQUIRED is what
+# the script imports; OPTIONAL is what yt-dlp picks up when it is there:
+# curl_cffi supplies the impersonation target whose absence draws rate limits
+# sooner. `deno` is the other optional piece and cannot be pip-installed.
+DEFAULT_VENV = Path("~/.screenscribe/venv")
+REQUIRED_DEPS = {"yt_dlp": "yt-dlp", "imagehash": "imagehash", "PIL": "pillow"}
+OPTIONAL_DEPS = {"curl_cffi": "curl_cffi"}
+
 # yt-dlp's id is network-derived, not a constrained token. For a URL that falls
 # through to the generic extractor it is `unquote(last path segment)`, so
 # `https://host/..%2f..%2fwork.mp4` yields the id `../../work` — real separators.
@@ -1159,6 +1170,84 @@ def cmd_artifact(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+def venv_python(venv: Path) -> Path:
+    """The interpreter inside a venv, on this platform."""
+    if os.name == "nt":
+        return venv / "Scripts" / "python.exe"
+    return venv / "bin" / "python"
+
+
+def missing_modules(py: Path, names) -> list[str]:
+    """Which of `names` that interpreter cannot import.
+
+    Asked of the venv's python, not this one — the whole point is that the
+    caller is usually a bare system python3 that has none of them.
+    """
+    probe = ("import importlib.util, sys\n"
+             "print(' '.join(m for m in sys.argv[1:]\n"
+             "               if importlib.util.find_spec(m) is None))")
+    try:
+        out = subprocess.run([str(py), "-c", probe, *names],
+                             capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return list(names)
+    return out.stdout.split()
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> None:
+    """Create the runtime venv and install what is missing. Idempotent.
+
+    Prints the interpreter path on stdout and nothing else, so a caller can bind
+    it directly:  PY=$(python3 screenscribe.py bootstrap)
+
+    Progress goes to stderr for that reason. Runs on a bare system python3 — it
+    imports only the standard library, because on a fresh plugin install nothing
+    else exists yet.
+    """
+    venv = Path(args.venv).expanduser() if args.venv else DEFAULT_VENV.expanduser()
+    py = venv_python(venv)
+
+    if not py.is_file():
+        print(f"-> creating venv at {venv}", file=sys.stderr)
+        import venv as venv_module
+        try:
+            venv_module.EnvBuilder(with_pip=True).create(venv)
+        except Exception as e:                      # noqa: BLE001
+            sys.exit(f"could not create venv at {venv}: {e}")
+        if not py.is_file():
+            sys.exit(f"venv created at {venv} but {py} is missing")
+
+    wanted = {**REQUIRED_DEPS, **OPTIONAL_DEPS}
+    missing = missing_modules(py, list(wanted))
+    if missing:
+        pkgs = sorted({wanted[m] for m in missing})
+        print(f"-> installing {' '.join(pkgs)}", file=sys.stderr)
+        # pip's stdout goes to stderr. stdout here carries exactly one thing —
+        # the interpreter path the caller binds — and a pip upgrade notice
+        # landing in it would silently corrupt that.
+        r = subprocess.run([str(py), "-m", "pip", "install", "-q", *pkgs],
+                           stdout=sys.stderr)
+        if r.returncode != 0:
+            sys.exit(f"pip install failed for {' '.join(pkgs)}")
+
+    # Re-check only what the script actually imports. An optional package that
+    # will not build on this machine must not fail the bootstrap.
+    still = missing_modules(py, list(REQUIRED_DEPS))
+    if still:
+        sys.exit(f"still missing after install: {' '.join(sorted(still))}")
+
+    absent = missing_modules(py, list(OPTIONAL_DEPS))
+    for tool, why in (("ffmpeg", "required — sampling cannot run without it"),
+                      ("deno", "optional — yt-dlp drops formats without a JS runtime")):
+        if not shutil.which(tool):
+            print(f"   ! {tool} not on PATH ({why})", file=sys.stderr)
+    if absent:
+        print(f"   ! optional, not installed: {' '.join(sorted(absent))}",
+              file=sys.stderr)
+
+    print(py)
+
+
 def cmd_build(args: argparse.Namespace) -> None:
     # Arguments first: the checks are free, deterministic, and independent of the
     # environment, so a typo gets named as a typo rather than being masked by
@@ -1180,8 +1269,8 @@ def cmd_build(args: argparse.Namespace) -> None:
     except ImportError as e:
         sys.exit(
             f"missing dependency: {e.name}\n"
-            f"  python3 -m venv ~/.screenscribe/venv\n"
-            f"  ~/.screenscribe/venv/bin/pip install -q yt-dlp imagehash pillow"
+            f"  run:  python3 {Path(__file__).name} bootstrap\n"
+            f"  then re-run this build with the interpreter it prints"
         )
 
     out = args.out if args.out is not None else bundles_root()
@@ -1288,6 +1377,12 @@ def cmd_window(args: argparse.Namespace) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="tutorial video -> spec-ready bundle")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    bs = sub.add_parser("bootstrap",
+                        help="create the runtime venv and install dependencies")
+    bs.add_argument("--venv", default=None,
+                    help=f"venv location (default {DEFAULT_VENV})")
+    bs.set_defaults(func=cmd_bootstrap)
 
     b = sub.add_parser("build", help="download a video and build a bundle")
     b.add_argument("url")

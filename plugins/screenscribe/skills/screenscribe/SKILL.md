@@ -76,37 +76,31 @@ fi
 SKILL_DIR=$(dirname "$(dirname "$SC")")
 
 # Dependencies live in a venv under $HOME, never in the plugin cache — that
-# directory is replaced on every plugin update.
-VENV=~/.screenscribe/venv
-PY=$([ -x "$VENV/bin/python" ] && echo "$VENV/bin/python" || command -v python3 || true)
-
-if [ -z "$PY" ]; then
-  echo "screenscribe: no python3 on PATH and no venv at $VENV" >&2
+# directory is replaced on every plugin update. `bootstrap` creates the venv,
+# installs whatever is missing, and prints the interpreter path. It imports only
+# the standard library, so it runs on a bare python3 on a fresh install, and it
+# is idempotent — silent and instant once everything is in place.
+PY=$(python3 "$SC" bootstrap) || {
+  echo "screenscribe: bootstrap failed — see the messages above" >&2
   exit 1
-fi
+}
 ```
 
 ## Stage 1 — build
 
-Requires `ffmpeg` on PATH. `build` preflights every Python dependency and names
-the missing one before downloading anything.
-
-```
-if build reports a missing dependency:
-    run the bootstrap below   # it rebinds $PY, which was resolved before the
-    retry the build           # venv existed and still points at bare python3
-```
+The resolver above already ran `bootstrap`, so the Python packages are present.
+Only the native tools are left to the platform:
 
 ```bash
 brew install ffmpeg deno     # or the platform's package manager
-python3 -m venv "$VENV"
-"$VENV/bin/pip" install -q yt-dlp imagehash pillow curl_cffi
-PY="$VENV/bin/python"
 ```
 
-`deno` and `curl_cffi` are optional and unpreflighted; without them yt-dlp warns
-about a missing JS runtime and impersonation target, drops formats, and draws
-rate limits sooner.
+| Tool | Needed |
+| - | - |
+| `ffmpeg` | required — sampling cannot run without it |
+| `deno` | optional — yt-dlp drops formats without a JS runtime |
+
+`bootstrap` warns when either is missing, and `build` refuses without `ffmpeg`.
 
 ```bash
 "$PY" "$SC" build "<url>"
