@@ -15,11 +15,8 @@ directory no `installPath` points at is unreachable — nothing loads it.
 
 ## Run it
 
-`$CLAUDE_PLUGIN_ROOT` is not set in every context this runs in, and unset it
-expands to `/skills/...`, which does not exist. Fall back to the registry, which
-records an `installPath` per install:
-
 ```bash
+# $CLAUDE_PLUGIN_ROOT is unset in some contexts, where it expands to /skills/...
 JAN="${CLAUDE_PLUGIN_ROOT:-}/skills/plugin-janitor/scripts/janitor.py"
 if [ ! -f "$JAN" ]; then
   JAN=$(python3 -c "
@@ -41,10 +38,13 @@ sys.exit(1)
 " || true)
 fi
 
+# `|| true` is load-bearing: find exits 1 with no ~/.claude/skills.
+[ -f "$JAN" ] || JAN=$(find ~/.claude/skills -path "*/plugin-janitor/scripts/janitor.py" \
+                        -print -quit 2>/dev/null || true)
+
 [ -f "$JAN" ] || { echo "plugin-janitor: cannot resolve janitor.py" >&2; exit 1; }
 
 python3 "$JAN"          # what would go, and what it frees
-python3 "$JAN" --yes    # delete it
 ```
 
 Stdlib only, so it runs on a bare `python3` with no venv.
@@ -54,7 +54,7 @@ Stdlib only, so it runs on a bare `python3` with no venv.
 | `--root <path>` | a plugins directory other than `~/.claude/plugins` |
 | `--yes` | actually delete |
 | `--json` | machine-readable report; never deletes |
-| `--allow-empty-registry` | delete when the registry lists no installs at all |
+| `--allow-unreachable-registry` | delete when no install resolves to a real directory |
 
 ```
 if the user asks to clean up or reclaim disk:
@@ -81,12 +81,11 @@ than guessing whenever it cannot be trusted:
 | missing, or not valid JSON | abort |
 | not an object, or no `plugins` object | abort |
 | an entry list that is not a list, or an entry that is not an object | abort |
-| valid, but naming no installs at all, beside a populated cache | abort unless `--allow-empty-registry` |
+| valid, but no install resolves to a directory that exists, beside a populated cache | abort on `--yes` unless `--allow-unreachable-registry`; the report still prints |
 
-The last one is the whole cache. An install-less registry is what "the user
-uninstalled everything" looks like, and equally what "this tool can no longer
-read the registry" looks like; the second is unrecoverable by the person who
-would have to notice it, so it decides the default.
+The last test is reachability, not emptiness: a registry naming sixteen plugins
+whose paths all point at a home directory since renamed parses fine and is still
+useless as an oracle.
 
 ## Registered but missing
 

@@ -47,7 +47,7 @@ class CacheCase(unittest.TestCase):
         self.write_registry()
         import argparse
         opts = dict(root=self.tmp, yes=False, json=False,
-                    allow_empty_registry=False)
+                    allow_unreachable_registry=False)
         opts.update(kw)
         buf = io.StringIO()
         with redirect_stdout(buf):
@@ -99,7 +99,7 @@ class TestItRefusesToGuess(CacheCase):
                 import argparse
                 j.main_with(argparse.Namespace(root=self.tmp, yes=True,
                                                json=False,
-                                               allow_empty_registry=False))
+                                               allow_unreachable_registry=False))
         self.assertIn("refusing", str(ctx.exception))
 
     def test_a_corrupt_registry_stops_everything(self) -> None:
@@ -110,7 +110,7 @@ class TestItRefusesToGuess(CacheCase):
                 import argparse
                 j.main_with(argparse.Namespace(root=self.tmp, yes=True,
                                                json=False,
-                                               allow_empty_registry=False))
+                                               allow_unreachable_registry=False))
 
     def test_a_registry_that_is_not_an_object_stops_everything(self) -> None:
         self.version("mk", "thing", "1.0.0")
@@ -120,7 +120,7 @@ class TestItRefusesToGuess(CacheCase):
                 import argparse
                 j.main_with(argparse.Namespace(root=self.tmp, yes=True,
                                                json=False,
-                                               allow_empty_registry=False))
+                                               allow_unreachable_registry=False))
 
 
 class TestDepthIsTheSignature(CacheCase):
@@ -348,10 +348,37 @@ class TestARegistryItCannotReadStopsEverything(CacheCase):
                     with redirect_stdout(io.StringIO()):
                         j.main_with(argparse.Namespace(
                             root=self.tmp, yes=True, json=False,
-                            allow_empty_registry=False))
-                self.assertIn("refusing to guess", str(ctx.exception))
+                            allow_unreachable_registry=False))
+                self.assertIn("may be out of date with the registry format", str(ctx.exception))
                 self.assertTrue(d.is_dir())
                 shutil.rmtree(self.cache); self.cache.mkdir()
+
+    def test_a_registry_whose_installs_all_dangle_is_refused(self) -> None:
+        """Found in round 2: the first guard tested for zero entries, so a
+        registry full of entries that all point at a home directory which has
+        since been renamed sailed through and took the whole cache."""
+        a = self.version("mk", "one", "1.0.0")
+        b = self.version("mk", "two", "2.0.0")
+        self.registry["plugins"]["one@mk"] = [
+            {"installPath": "/moved/cache/mk/one/1.0.0"}]
+        self.registry["plugins"]["two@mk"] = [
+            {"installPath": "/moved/cache/mk/two/2.0.0"}]
+        with self.assertRaises(SystemExit) as ctx:
+            self.run_it(yes=True)
+        self.assertIn("resolves to a directory that exists", str(ctx.exception))
+        self.assertTrue(a.is_dir())
+        self.assertTrue(b.is_dir())
+
+    def test_one_resolvable_install_is_enough_to_proceed(self) -> None:
+        """The guard must not fire on a healthy registry that merely also
+        carries a dangling entry — that is the common case, not the alarming one."""
+        old_ = self.version("mk", "gone", "1.0.0")
+        self.version("mk", "kept", "2.0.0", installed=True)
+        self.registry["plugins"]["ghost@mk"] = [
+            {"installPath": "/nonexistent/0.1.0"}]
+        out = self.run_it(yes=True)
+        self.assertFalse(old_.exists())
+        self.assertIn("removed 1", out)
 
     def test_no_installs_beside_a_populated_cache_is_refused(self) -> None:
         """The wipe this guard was written for: registry says nothing is
@@ -360,7 +387,7 @@ class TestARegistryItCannotReadStopsEverything(CacheCase):
         b = self.version("mk", "two", "2.0.0")
         with self.assertRaises(SystemExit) as ctx:
             self.run_it(yes=True)
-        self.assertIn("Refusing to delete the whole cache", str(ctx.exception))
+        self.assertIn("Refusing to delete", str(ctx.exception))
         self.assertTrue(a.is_dir())
         self.assertTrue(b.is_dir())
 
@@ -374,14 +401,14 @@ class TestARegistryItCannotReadStopsEverything(CacheCase):
     def test_the_escape_hatch_is_its_own_flag(self) -> None:
         """Someone who really did uninstall everything can still sweep."""
         a = self.version("mk", "one", "1.0.0")
-        out = self.run_it(yes=True, allow_empty_registry=True)
+        out = self.run_it(yes=True, allow_unreachable_registry=True)
         self.assertFalse(a.exists())
         self.assertIn("removed 1", out)
 
     def test_yes_alone_does_not_imply_it(self) -> None:
         self.version("mk", "one", "1.0.0")
         with self.assertRaises(SystemExit):
-            self.run_it(yes=True, allow_empty_registry=False)
+            self.run_it(yes=True, allow_unreachable_registry=False)
 
 
 class TestItLeavesRegisteredDirectoriesAlone(CacheCase):

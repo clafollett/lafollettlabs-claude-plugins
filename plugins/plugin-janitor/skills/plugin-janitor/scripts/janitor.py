@@ -24,8 +24,9 @@ Usage:
     ./janitor.py --yes      # actually remove it
     ./janitor.py --json     # machine-readable, never deletes
 
-A registry that lists no installs at all is refused rather than treated as "every
-version is stale" — pass --allow-empty-registry when nothing really is installed.
+A registry in which no install resolves to a directory that exists is refused
+rather than treated as "every version is stale" — pass
+--allow-unreachable-registry when the cache really is all stale.
 """
 
 from __future__ import annotations
@@ -42,6 +43,13 @@ from pathlib import Path
 PLUGINS = Path("~/.claude/plugins")
 CACHE = "cache"
 REGISTRY = "installed_plugins.json"
+
+# Every shape check below exits with this. Failing closed is right for something
+# that deletes — but a bare "refusing to guess" reads as a bug in the registry
+# when the likelier cause is that this tool is a version behind the format.
+SCHEMA_DRIFT = ("This tool may be out of date with the registry format. It "
+                "deletes nothing until it\n  can read it — update plugin-janitor, "
+                "or report the shape above.")
 
 # Names come off the filesystem and out of a JSON manifest, and land in a table
 # a person reads before authorising a delete. ESC is not whitespace, so
@@ -111,17 +119,18 @@ def installed(root: Path) -> tuple[set[str], list[tuple[str, str, str]]]:
     # cached version looks unreachable — which is the whole cache.
     plugins = data.get("plugins")
     if not isinstance(plugins, dict):
-        sys.exit(f"{root / REGISTRY} has no 'plugins' object — refusing to guess")
+        sys.exit(f"{root / REGISTRY} has no 'plugins' object.\n"
+                 f"  {SCHEMA_DRIFT}")
 
     live, dangling = set(), []
     for key, entries in plugins.items():
         if not isinstance(entries, list):
-            sys.exit(f"{root / REGISTRY}: {key!r} is not a list of installs — "
-                     f"refusing to guess")
+            sys.exit(f"{root / REGISTRY}: {key!r} is not a list of installs.\n"
+                     f"  {SCHEMA_DRIFT}")
         for entry in entries:
             if not isinstance(entry, dict):
-                sys.exit(f"{root / REGISTRY}: {key!r} holds a non-object entry — "
-                         f"refusing to guess")
+                sys.exit(f"{root / REGISTRY}: {key!r} holds a non-object entry.\n"
+                         f"  {SCHEMA_DRIFT}")
             raw = entry.get("installPath")
             if not raw:
                 continue
@@ -270,9 +279,10 @@ def main() -> None:
                     help="actually delete; without it this is a dry run")
     ap.add_argument("--json", action="store_true",
                     help="machine-readable report; never deletes")
-    ap.add_argument("--allow-empty-registry", action="store_true",
-                    help="delete even when the registry lists no installs at "
-                         "all; without it that case is refused")
+    ap.add_argument("--allow-unreachable-registry", action="store_true",
+                    help="delete even when no install in the registry "
+                         "resolves to a directory that exists; refused "
+                         "without it")
     main_with(ap.parse_args())
 
 
@@ -334,20 +344,27 @@ def main_with(args: argparse.Namespace) -> None:
         return
 
     # Deliberately below the dry run and the --json report, so the plan is
-    # always visible and only the deletion is gated. An empty registry beside a
-    # populated cache is genuinely ambiguous: it is what "the user uninstalled
-    # everything" looks like, and equally what "this tool can no longer read the
-    # registry" looks like. The second is unrecoverable by the person who would
-    # have to notice, so it decides the default.
-    if every and not live and not args.allow_empty_registry:
-        sys.exit(f"{root / REGISTRY} lists no installs, but {cache} holds "
-                 f"{len(every)} version{'s' if len(every) != 1 else ''}.\n"
-                 f"  Every one of them looks unreachable — which is also exactly "
-                 f"how a registry this tool\n"
-                 f"  cannot read would look. Refusing to delete the whole cache "
-                 f"on that basis.\n"
-                 f"  If nothing really is installed, re-run with "
-                 f"--allow-empty-registry.")
+    # always visible and only the deletion is gated.
+    #
+    # The test is whether ANY install resolves to a directory that is really
+    # there — not whether the registry has entries. A registry listing sixteen
+    # plugins whose paths all point at a home directory that has been renamed
+    # parses fine, has entries, and is still useless as an oracle: every version
+    # on disk looks unreachable and the sweep takes the whole cache. That state
+    # is what "the user uninstalled everything" looks like, and equally what a
+    # moved cache, a restored backup or a changed path scheme looks like. Only
+    # the first is recoverable by the person who would have to notice, so the
+    # rest decide the default.
+    reachable = live - {resolved for _, _, resolved in dangling}
+    if every and not reachable and not args.allow_unreachable_registry:
+        sys.exit(f"no install in {root / REGISTRY} resolves to a directory that "
+                 f"exists, but {cache}\n"
+                 f"  holds {len(every)} version{'s' if len(every) != 1 else ''} — "
+                 f"so every one of them looks unreachable, which is also exactly\n"
+                 f"  how a moved cache or a registry this tool cannot read would "
+                 f"look. Refusing to delete\n"
+                 f"  the whole cache on that basis. If it really is all stale, "
+                 f"re-run with --allow-unreachable-registry.")
 
     done = [v for v in stale if remove(v, cache)]
     if stale:

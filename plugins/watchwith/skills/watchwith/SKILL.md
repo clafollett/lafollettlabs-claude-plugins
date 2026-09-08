@@ -227,20 +227,24 @@ report is what stage 4 asks against.
 
 ## Stage 4 — emit
 
-An instruction given before the notes existed was a guess — the user had not
-seen the frames yet, and neither had you. It does not count as an answer.
+An instruction given before stage 3 ran was a guess — the user had not seen the
+frames yet, and neither had you. It does not count as an answer.
 
 The shape and the page are independent. Naming one does not answer the other.
 
 ```
-if the user asked a question, not for an artifact:  answer inline, ask nothing
+if the user asked a question, not for an artifact:
+    answer inline; ask nothing
+else:
+    open = []
+    if shape not answered after stage 3 ran:  open += "what this becomes"
+    if page not answered after stage 3 ran:   open += "a page as well"
+    if open:  AskUserQuestion — one call, those rows only, before writing
 
-open = []
-if shape not answered AFTER the notes existed:  open += "what this becomes"
-if page not answered AFTER the notes existed:   open += "a page as well"
-if a page is wanted and no span was named:      open += "which span"
-
-if open:  AskUserQuestion — one call, those rows only, before writing anything
+    # Only now is it known whether a page is wanted.
+    if a page is wanted and no span was named:
+        AskUserQuestion again — a page needs a span, and the whole video is
+        rarely the answer
 ```
 
 | Question | Options |
