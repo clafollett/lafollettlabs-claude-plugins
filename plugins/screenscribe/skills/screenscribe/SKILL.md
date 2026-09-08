@@ -217,25 +217,24 @@ commands, file paths, flags, versions, config values, error text.
 Where narration and frames disagree the frames win, and the disagreement is
 worth recording.
 
-Say how many frames you read before going further.
+Say how many frames you read, and what you found, before going further. That
+report is what stage 4 asks against.
 
 ## Stage 4 — emit
 
-Two independent decisions — what this becomes, and whether a page comes with
-it. Naming one does not answer the other.
+An instruction given before the scribe existed was a guess — the user had not
+seen the frames yet. It does not count as an answer.
 
 ```
-open = []
-if the user has not named the shape:        open += "what this becomes"
-if the user has not said about a page:      open += "a page as well"
-
-if open:
-    AskUserQuestion — one call, only the open ones, before writing anything
+if the user asked a question, not for an artifact:  answer inline, ask nothing
+elif they answered AFTER the scribe existed:        honour it, ask nothing
+else:                                               AskUserQuestion, one call,
+                                                    BOTH rows below
 ```
 
 | Question | Options |
 | - | - |
-| what this becomes | the rows below |
+| what this becomes | the rows further down |
 | a page as well | no · a local HTML file in the bundle · a published Artifact |
 
 | Artifact | Shape |
@@ -251,8 +250,7 @@ For a spec, apply `$SKILL_DIR/references/spec-quality.md` and write to
 `docs/specs/`, zero-padded to three digits. Never overwrite an existing file.
 
 Write any other artifact to `docs/notes/<slug>.md` unless the user named a
-destination, and say where you put it. Answer inline instead only when the user
-asked a question rather than for an artifact.
+destination, and say where you put it.
 
 ### A page to look at
 
