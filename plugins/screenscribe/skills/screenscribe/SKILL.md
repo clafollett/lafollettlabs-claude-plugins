@@ -221,11 +221,22 @@ Say how many frames you read before going further.
 
 ## Stage 4 — emit
 
+Two independent decisions — what this becomes, and whether a page comes with
+it. Naming one does not answer the other.
+
 ```
-if the user named what they want:  build exactly that
-else:                              AskUserQuestion first, in one call:
-                                     which row below, and whether a page too
+open = []
+if the user has not named the shape:        open += "what this becomes"
+if the user has not said about a page:      open += "a page as well"
+
+if open:
+    AskUserQuestion — one call, only the open ones, before writing anything
 ```
+
+| Question | Options |
+| - | - |
+| what this becomes | the rows below |
+| a page as well | no · a local HTML file in the bundle · a published Artifact |
 
 | Artifact | Shape |
 | - | - |
@@ -249,18 +260,16 @@ Never a substitute for the file above — a spec still lands in the repo as text
 an agent executes. This is for a person: a review, a walkthrough, a summary
 someone will read.
 
-`artifact` writes a self-contained HTML file either way. Where it goes is the
-user's call, and the two are not the same act:
+`artifact` writes a self-contained HTML file either way. The answer to "a page
+as well" says where it goes, and the two are not the same act:
 
-| Destination | |
+| Answer | What to do |
 | - | - |
-| `-o <bundle>/<slug>.html` | a local file, opened from disk; nothing leaves the machine |
-| the Artifact tool | published to claude.ai and reachable by link |
+| a local HTML file | `-o <bundle>/<slug>.html` — opened from disk, nothing leaves the machine |
+| a published Artifact | build it, then publish with the Artifact tool |
 
 ```
-if the user said which:  that one
-else:                    ask
-if still unclear:        the local file
+if the answer is still unclear:  the local file
 ```
 
 Publishing is republishing — the page carries another author's frames.
@@ -270,8 +279,7 @@ Publishing is republishing — the page carries another author's frames.
 ```
 
 Builds a self-contained page: frames embedded as data URIs, each paired with the
-narration spoken over it, chapters, the author's description and its links. Then
-publish it with the Artifact tool.
+narration spoken over it, chapters, the author's description and its links.
 
 ```
 if page > 12 MB:
