@@ -200,6 +200,125 @@ class TestReport(CacheCase):
         self.assertIn("verified", out)
 
 
+class TestEmptyDirectories(CacheCase):
+    """Removing a plugin's last version leaves the directory it lived in.
+
+    Found by running it: the screenscribe -> watchwith rename emptied a plugin
+    directory that no later sweep would ever name again, because `versions`
+    only sees three levels down.
+    """
+
+    def test_a_plugin_directory_goes_with_its_last_version(self) -> None:
+        old = self.version("mk", "gone", "1.0.0")
+        self.version("mk", "kept", "2.0.0", installed=True)
+        self.run_it(yes=True)
+        self.assertFalse(old.exists())
+        self.assertFalse((self.cache / "mk" / "gone").exists())
+        self.assertTrue((self.cache / "mk" / "kept").is_dir())
+
+    def test_a_plugin_with_a_surviving_version_keeps_its_directory(self) -> None:
+        self.version("mk", "thing", "1.0.0")
+        self.version("mk", "thing", "2.0.0", installed=True)
+        self.run_it(yes=True)
+        self.assertTrue((self.cache / "mk" / "thing").is_dir())
+
+    def test_a_marketplace_goes_when_its_last_plugin_does(self) -> None:
+        self.version("dead", "gone", "1.0.0")
+        self.version("live", "kept", "2.0.0", installed=True)
+        self.run_it(yes=True)
+        self.assertFalse((self.cache / "dead").exists())
+        self.assertTrue((self.cache / "live").is_dir())
+
+    def test_an_already_empty_directory_is_swept(self) -> None:
+        """The real case: the versions went in an earlier run, the shell stayed."""
+        shell = self.cache / "mk" / "ghost"
+        shell.mkdir(parents=True)
+        self.version("mk", "kept", "2.0.0", installed=True)
+        out = self.run_it(yes=True)
+        self.assertFalse(shell.exists())
+        self.assertIn("pruned 1", out)
+
+    def test_it_is_reported_with_nothing_else_to_do(self) -> None:
+        """No stale versions must not short-circuit past an empty directory."""
+        shell = self.cache / "mk" / "ghost"
+        shell.mkdir(parents=True)
+        self.version("mk", "kept", "2.0.0", installed=True)
+        out = self.run_it()
+        self.assertNotIn("nothing stale", out)
+        self.assertIn("mk/ghost", out)
+        self.assertTrue(shell.is_dir())
+
+    def test_a_dry_run_predicts_it_without_deleting(self) -> None:
+        self.version("mk", "gone", "1.0.0")
+        self.version("mk", "kept", "2.0.0", installed=True)
+        out = self.run_it()
+        self.assertIn("mk/gone", out)
+        self.assertTrue((self.cache / "mk" / "gone").is_dir())
+
+    def test_a_stray_file_keeps_the_directory(self) -> None:
+        """`rmdir` would refuse anyway; the plan must not claim otherwise."""
+        old = self.version("mk", "gone", "1.0.0")
+        (self.cache / "mk" / "gone" / "NOTES.md").write_text("x")
+        self.version("mk", "kept", "2.0.0", installed=True)
+        out = self.run_it(yes=True)
+        self.assertFalse(old.exists())
+        self.assertTrue((self.cache / "mk" / "gone").is_dir())
+        self.assertNotIn("pruned", out)
+
+    def test_a_symlink_keeps_the_directory(self) -> None:
+        self.version("mk", "kept", "2.0.0", installed=True)
+        real = self.tmp / "elsewhere"
+        real.mkdir()
+        try:
+            (self.cache / "mk" / "gone").mkdir(parents=True)
+            (self.cache / "mk" / "gone" / "1.0.0").symlink_to(real)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.run_it(yes=True)
+        self.assertTrue((self.cache / "mk" / "gone").is_dir())
+        self.assertTrue(real.is_dir())
+
+    def test_json_lists_it_and_deletes_nothing(self) -> None:
+        shell = self.cache / "mk" / "ghost"
+        shell.mkdir(parents=True)
+        self.version("mk", "kept", "2.0.0", installed=True)
+        out = self.run_it(json=True, yes=True)
+        self.assertEqual(json.loads(out)["emptied"], [str(shell)])
+        self.assertTrue(shell.is_dir())
+
+
+class TestPruneRefuses(CacheCase):
+    def test_it_will_not_touch_the_cache_root(self) -> None:
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertFalse(j.prune(self.cache, self.cache))
+        self.assertIn("skipped", buf.getvalue())
+        self.assertTrue(self.cache.is_dir())
+
+    def test_it_will_not_go_outside_the_cache(self) -> None:
+        outside = self.tmp / "not-the-cache"
+        outside.mkdir()
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertFalse(j.prune(outside, self.cache))
+        self.assertIn("skipped", buf.getvalue())
+        self.assertTrue(outside.is_dir())
+
+    def test_it_will_not_reach_version_depth(self) -> None:
+        """A version directory is `remove`'s job, and it is not empty."""
+        d = self.version("mk", "thing", "1.0.0")
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertFalse(j.prune(d, self.cache))
+        self.assertIn("skipped", buf.getvalue())
+        self.assertTrue(d.is_dir())
+
+    def test_rmdir_is_the_backstop_for_a_non_empty_directory(self) -> None:
+        """Even told to, it cannot take something that still holds a file."""
+        self.version("mk", "thing", "1.0.0")
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertFalse(j.prune(self.cache / "mk" / "thing", self.cache))
+        self.assertIn("skipped", buf.getvalue())
+        self.assertTrue((self.cache / "mk" / "thing").is_dir())
+
+
 class TestHuman(unittest.TestCase):
     def test_units(self) -> None:
         self.assertEqual(j.human(0), "0B")

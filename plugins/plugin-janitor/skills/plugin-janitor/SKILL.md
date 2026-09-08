@@ -38,11 +38,15 @@ if the user asks to clean up or reclaim disk:
 
 ## What it will not do
 
-Deletion is limited to directories exactly three levels under `cache/`
+Version deletion is limited to directories exactly three levels under `cache/`
 (`<marketplace>/<plugin>/<version>`) that no `installPath` resolves to.
 Symlinked version directories are skipped rather than followed. A missing or
 unparseable `installed_plugins.json` aborts the run — without it every version
 looks unreachable.
+
+A `<plugin>` or `<marketplace>` directory left empty by that sweep goes too, by
+`rmdir` and never `rmtree`: one still holding anything — a file, a symlink, a
+version that refused to go — survives.
 
 ## Registered but missing
 
