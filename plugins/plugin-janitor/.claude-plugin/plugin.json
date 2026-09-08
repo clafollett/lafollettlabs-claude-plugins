@@ -1,0 +1,19 @@
+{
+  "name": "plugin-janitor",
+  "description": "Remove cached plugin versions that no install points at — marketplace updates copy each bumped plugin into the cache and never sweep, so every version ever installed stays on disk",
+  "version": "0.1.0",
+  "author": {
+    "name": "LaFollett Labs LLC",
+    "email": "cali.lafollett@gmail.com"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins",
+  "keywords": [
+    "claude-code",
+    "plugins",
+    "cache",
+    "cleanup",
+    "disk-space",
+    "maintenance"
+  ]
+}

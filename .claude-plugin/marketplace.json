@@ -5,48 +5,55 @@
     "email": "cali.lafollett@gmail.com"
   },
   "metadata": {
-    "description": "Cross-project Claude Code plugins for LaFollett Labs — session management, issue tracking, and developer workflow tools",
-    "version": "1.27.2"
+    "description": "Cross-project Claude Code plugins for LaFollett Labs \u2014 session management, issue tracking, and developer workflow tools",
+    "version": "1.28.0"
   },
   "plugins": [
     {
       "name": "code-reviewer",
-      "description": "PE-powered code reviews with five-pass protocol (Architecture → Quality+Tests → Security → Adversarial Re-read → Self-Adversarial) and project bootstrapping via init-project",
+      "description": "PE-powered code reviews with five-pass protocol (Architecture \u2192 Quality+Tests \u2192 Security \u2192 Adversarial Re-read \u2192 Self-Adversarial) and project bootstrapping via init-project",
       "source": "./plugins/code-reviewer",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
     },
     {
       "name": "context-handoff",
-      "description": "Session state handoff, resume, and context usage monitoring — save working context to JSON, resume in fresh sessions, and get automatic warnings as context fills up",
+      "description": "Session state handoff, resume, and context usage monitoring \u2014 save working context to JSON, resume in fresh sessions, and get automatic warnings as context fills up",
       "source": "./plugins/context-handoff",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
     },
     {
       "name": "issue-manager",
-      "description": "GitHub Issue management with intent-over-implementation templates — Epics, Stories, Tasks, Bugs with quality gates and CLI automation",
+      "description": "GitHub Issue management with intent-over-implementation templates \u2014 Epics, Stories, Tasks, Bugs with quality gates and CLI automation",
       "source": "./plugins/issue-manager",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
     },
     {
-      "name": "session-analyzer",
-      "description": "Analyze and extract conversations from Claude Code session JSONL files — transcripts, token stats, tool usage, and session discovery",
-      "source": "./plugins/session-analyzer",
+      "name": "plugin-janitor",
+      "description": "Remove cached plugin versions that no install points at \u2014 marketplace updates copy each bumped plugin into the cache and never sweep, so every version ever installed stays on disk",
+      "source": "./plugins/plugin-janitor",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
     },
     {
       "name": "screenscribe",
-      "description": "Watch a video and write down what was actually on screen — dense frame sampling with windowed read-back so Claude reads the pixels transcripts omit, then whatever artifact the work needs: spec, review, summary, or walkthrough",
+      "description": "Watch a video and write down what was actually on screen \u2014 dense frame sampling with windowed read-back so Claude reads the pixels transcripts omit, then whatever artifact the work needs: spec, review, summary, or walkthrough",
       "source": "./plugins/screenscribe",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
     },
     {
+      "name": "session-analyzer",
+      "description": "Analyze and extract conversations from Claude Code session JSONL files \u2014 transcripts, token stats, tool usage, and session discovery",
+      "source": "./plugins/session-analyzer",
+      "category": "developer-tools",
+      "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"
+    },
+    {
       "name": "ux-designer",
-      "description": "UX design harness — structured discovery, prototype generation, visual iteration via Playwright, Storybook support, parallel variations via worktrees",
+      "description": "UX design harness \u2014 structured discovery, prototype generation, visual iteration via Playwright, Storybook support, parallel variations via worktrees",
       "source": "./plugins/ux-designer",
       "category": "developer-tools",
       "homepage": "https://github.com/lafollett-labs/lafollett-labs-claude-plugins"

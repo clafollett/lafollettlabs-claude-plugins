@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`plugin-janitor` (v0.1.0, marketplace 1.28.0): a new plugin.** `/plugin marketplace update` fetches the whole marketplace repo, then copies each plugin whose version changed into `cache/<marketplace>/<plugin>/<version>/`. It copies; it never sweeps. Measured on one machine: 72 version bumps across six plugins, every one of them still a directory on disk unless someone removed it by hand.
+  - `installed_plugins.json` records one `installPath` per installed plugin, so reachability is decidable: a version directory no `installPath` resolves to is dead. Janitor removes exactly those.
+  - Dry run by default; `--yes` deletes; `--json` reports and never deletes. Stdlib only, so it runs on a bare `python3` before any venv exists — the machine whose plugins are broken is the one this runs on.
+  - Deletion is limited to directories exactly three levels under `cache/`, symlinked version directories are skipped rather than followed, `remove()` re-derives that shape instead of trusting its caller, and a missing or unparseable `installed_plugins.json` aborts the run — without it every version looks unreachable.
+  - It also reports plugins registered as installed whose directory is gone, and does not touch them. Found one such entry on the author's machine.
+  - 18 tests. One of them caught a real defect before the first run: the post-delete self-check recovered a path by re-parsing its own display string, so a *pre-existing* dangling install was reported as "janitor removed a live install" wherever the raw and resolved paths differ — `/var` vs `/private/var` on macOS was enough. Dangling entries are now carried as structured records, not re-parsed text.
+
 ### Fixed
 - `screenscribe` (v0.7.2, marketplace 1.27.2): `prune`'s one-line help still read "evict frames, keeping the scribe" — the behaviour removed in v0.7.0. It is the line `--help` shows for the subcommand, so the only description of `prune` a user sees without drilling in described the wrong command.
 - `screenscribe` (v0.7.1, marketplace 1.27.1): `assets/spec-template.md` told an agent to re-open a cited span with `window <video_id> 12:04-14:30`, which argparse rejects — `window` takes `start` and `end` as two arguments. The hyphenated form is correct for the `Watch:` citation and wrong as a command, and the template used it for both, so every agent following it hit "the following arguments are required: end". Carried as INFO-002 since the v0.3.0 review; verified failing, then fixed.
