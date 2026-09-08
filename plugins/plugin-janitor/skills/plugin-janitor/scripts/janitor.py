@@ -148,6 +148,26 @@ def installed(root: Path) -> tuple[set[str], list[tuple[str, str, str]]]:
     return live, dangling
 
 
+def ident(path: str | Path) -> tuple[int, int] | None:
+    """`(st_dev, st_ino)` — what actually identifies a directory.
+
+    `str(Path(p).resolve())` was the test, and it is wrong on the filesystem
+    this most often runs on. macOS is case-insensitive by default, so a registry
+    that recorded `.../cache/MKT/plug/1.0.0` for a directory on disk at
+    `.../cache/mkt/plug/1.0.0` passes `is_dir()` — the install is reachable and
+    the guard is correctly silent — and then fails string equality, so the
+    version is classed stale and the live install is deleted. The self-check
+    catches it, loudly, after the fact.
+
+    Identity settles case, symlinks, trailing separators and `..` in one move.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
 def versions(cache: Path) -> list[Version]:
     """Every version directory, at exactly `<marketplace>/<plugin>/<version>`.
 
@@ -294,7 +314,8 @@ def main_with(args: argparse.Namespace) -> None:
 
     live, dangling = installed(root)
     every = versions(cache)
-    stale = [v for v in every if str(v.path.resolve()) not in live]
+    installed_ids = {i for i in (ident(r) for r in live) if i is not None}
+    stale = [v for v in every if ident(v.path) not in installed_ids]
     freed = sum(v.bytes for v in stale)
     empty = emptied(cache, stale, live)
 

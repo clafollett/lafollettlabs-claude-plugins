@@ -432,6 +432,35 @@ class TestItLeavesRegisteredDirectoriesAlone(CacheCase):
         self.assertFalse(shell.exists())
 
 
+class TestIdentityNotSpelling(CacheCase):
+    def test_a_case_differing_install_path_is_not_stale(self) -> None:
+        """macOS is case-insensitive by default, so a registry recording
+        cache/MKT/... for a directory on disk at cache/mkt/... passed is_dir()
+        — reachable, guard silent — then failed string equality and the live
+        install was deleted. The self-check caught it after the fact."""
+        d = self.version("mkt", "plug", "1.0.0")
+        odd = str(self.cache / "MKT" / "plug" / "1.0.0")
+        if not (self.cache / "MKT").is_dir():
+            self.skipTest("case-sensitive filesystem")
+        self.registry["plugins"]["plug@mkt"] = [{"installPath": odd}]
+        out = self.run_it(yes=True)
+        self.assertNotIn("THIS IS A BUG", out)
+        self.assertTrue(d.is_dir())
+
+    def test_a_trailing_separator_is_not_stale(self) -> None:
+        d = self.version("mkt", "plug", "1.0.0")
+        self.registry["plugins"]["plug@mkt"] = [{"installPath": str(d) + os.sep}]
+        self.run_it(yes=True)
+        self.assertTrue(d.is_dir())
+
+    def test_a_genuinely_different_directory_is_still_stale(self) -> None:
+        """Identity must not make everything look installed."""
+        old = self.version("mkt", "plug", "1.0.0")
+        self.version("mkt", "plug", "2.0.0", installed=True)
+        self.run_it(yes=True)
+        self.assertFalse(old.exists())
+
+
 class TestThePlanIsReconciled(CacheCase):
     def test_a_directory_the_plan_promised_but_kept_is_reported(self) -> None:
         """A refusal used to leave the printed plan quietly unfulfilled."""

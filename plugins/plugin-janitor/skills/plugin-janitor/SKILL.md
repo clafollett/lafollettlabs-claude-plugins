@@ -83,10 +83,6 @@ than guessing whenever it cannot be trusted:
 | an entry list that is not a list, or an entry that is not an object | abort |
 | valid, but no install resolves to a directory that exists, beside a populated cache | abort on `--yes` unless `--allow-unreachable-registry`; the report still prints |
 
-The last test is reachability, not emptiness: a registry naming sixteen plugins
-whose paths all point at a home directory since renamed parses fine and is still
-useless as an oracle.
-
 ## Registered but missing
 
 The report also names plugins whose `installPath` has no directory. Janitor does
