@@ -134,15 +134,27 @@ def installed(root: Path) -> tuple[set[str], list[tuple[str, str, str]]]:
             raw = entry.get("installPath")
             if not raw:
                 continue
-            # An installPath is absolute. A relative one resolves against the
-            # process working directory, so whether an install looks reachable
-            # would depend on where janitor was run from — and beside one
-            # absolute entry, which keeps the reachability guard quiet, that
-            # deletes a live install with the self-check none the wiser,
-            # because the path is already accounted for as dangling.
-            if not Path(raw).is_absolute():
+            # Every other shape check exits with SCHEMA_DRIFT; a non-string
+            # here used to reach `Path(raw)` and raise a bare TypeError
+            # traceback instead. `if not raw` does not catch it — an object and
+            # a non-empty list are both truthy.
+            if not isinstance(raw, str):
+                sys.exit(f"{root / REGISTRY}: {key!r} has a non-string "
+                         f"installPath {raw!r}.\n  {SCHEMA_DRIFT}")
+            # `~` is expanded rather than refused: it names the home directory
+            # unambiguously, and refusing it would let one such entry disable
+            # the tool outright. What is left after expansion must be absolute
+            # — a relative path resolves against the process working directory,
+            # so whether an install looked reachable would depend on where
+            # janitor was run from, and beside one absolute entry (which keeps
+            # the reachability guard quiet) that deleted a live install with
+            # the self-check none the wiser, since the path was already
+            # accounted for as dangling.
+            expanded = Path(raw).expanduser()
+            if not expanded.is_absolute():
                 sys.exit(f"{root / REGISTRY}: {key!r} has a relative "
                          f"installPath {raw!r}.\n  {SCHEMA_DRIFT}")
+            raw = str(expanded)
             path = Path(raw)
             resolved = str(path.resolve())
             live.add(resolved)

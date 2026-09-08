@@ -380,6 +380,31 @@ class TestARegistryItCannotReadStopsEverything(CacheCase):
         self.assertFalse(old_.exists())
         self.assertIn("removed 1", out)
 
+    def test_a_non_string_install_path_aborts_like_every_other_shape(self) -> None:
+        """It reached Path(raw) and raised a bare TypeError traceback. Nothing
+        deleted either way, but the file's contract is that an unrecognised
+        shape exits with the schema-drift message."""
+        for value in ({"path": "/x"}, ["/x"], 12345, True):
+            with self.subTest(value=value):
+                d = self.version("mk", "thing", "1.0.0")
+                self.registry["plugins"] = {"a@mk": [{"installPath": value}]}
+                with self.assertRaises(SystemExit) as ctx:
+                    self.run_it(yes=True)
+                self.assertIn("non-string installPath", str(ctx.exception))
+                self.assertTrue(d.is_dir())
+                shutil.rmtree(self.cache); self.cache.mkdir()
+
+    def test_a_tilde_install_path_is_expanded_not_refused(self) -> None:
+        """Refusing it would let one such entry disable the tool outright; it
+        names the home directory unambiguously, so it is expanded and then
+        treated like any other absolute path — here, a dangling one."""
+        self.version("mk", "kept", "2.0.0", installed=True)
+        self.registry["plugins"]["ghost@mk"] = [
+            {"installPath": "~/definitely/not/here/0.1.0"}]
+        out = self.run_it()
+        self.assertIn("registered but missing", out)
+        self.assertNotIn("relative installPath", out)
+
     def test_a_relative_install_path_aborts(self) -> None:
         """It resolves against the process cwd, so reachability would depend on
         where janitor was run from. Beside one absolute entry — which keeps the
