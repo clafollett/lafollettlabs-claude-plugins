@@ -1354,6 +1354,18 @@ class Entry:
         return str(self.meta.get("id") or self.path.name)
 
     @property
+    def cues(self) -> int:
+        """Transcript lines. Zero is a real state, not a corrupt bundle.
+
+        `fetch_subtitles` is deliberately non-fatal — YouTube rate-limits the
+        caption endpoint far harder than the media one — so a build can finish
+        with every frame and no narration. Nothing downstream said so, and a
+        bundle whose whole premise is pairing the two is worth flagging before
+        someone reads it and concludes the video was silent.
+        """
+        return len(self.meta.get("transcript") or [])
+
+    @property
     def frames(self) -> int:
         """Frames currently on disk."""
         if self._frames is None:
@@ -1494,6 +1506,7 @@ def cmd_index(args: argparse.Namespace) -> None:
             "url": e.meta.get("url"),
             "duration": e.meta.get("duration") or 0,
             "frames": e.frames,
+            "cues": e.cues,
             "bytes": e.bytes,
             "last_used": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(e.used)),
             "path": str(e.path),
@@ -1504,17 +1517,24 @@ def cmd_index(args: argparse.Namespace) -> None:
         print(f"no bundles under {root}")
         return
 
-    print(f"{'ID':<12} {'FRAMES':>7} {'SIZE':>8} {'LENGTH':>8}  "
+    print(f"{'ID':<12} {'FRAMES':>7} {'CUES':>6} {'SIZE':>8} {'LENGTH':>8}  "
           f"{'LAST READ':<10}  TITLE")
+    silent = 0
     for e in entries:
-        print(f"{clip(e.id, 12):<12} {e.frames:>7} {human(e.bytes):>8} "
+        cues = e.cues
+        silent += not cues
+        print(f"{clip(e.id, 12):<12} {e.frames:>7} "
+              f"{cues if cues else 'none':>6} {human(e.bytes):>8} "
               f"{hhmmss(e.meta.get('duration') or 0):>8}  "
               f"{time.strftime('%Y-%m-%d', time.localtime(e.used)):<10}  "
-              f"{clip(e.meta.get('title') or '', 52)}")
+              f"{clip(e.meta.get('title') or '', 44)}")
 
     total = sum(e.bytes for e in entries)
     print(f"\n{len(entries)} bundle{'s' if len(entries) != 1 else ''} · "
           f"{human(total)} on disk in {root}")
+    if silent:
+        print(f"{silent} with no narration — the caption fetch failed at build "
+              f"time. Re-run build to get it.")
 
 
 def cmd_search(args: argparse.Namespace) -> None:

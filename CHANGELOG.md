@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `screenscribe` (v0.7.5): **`index` shows a CUES column, and says when a bundle has none.** `fetch_subtitles` is deliberately non-fatal — YouTube rate-limits the caption endpoint far harder than the media one, and two builds died on HTTP 429 there before it was made recoverable — so a build can finish with every frame and no transcript. Nothing downstream said so, and a bundle whose whole premise is pairing frames with the narration spoken over them is worth flagging before someone reads it and concludes the video was silent. `none` in the column, a footer line naming the cause and the fix, and `cues` in `index --json`. SKILL.md tells the model to say so before reading such a bundle rather than after.
+- `plugin-janitor` (v0.1.1): `argument-hint` in the frontmatter, matching screenscribe.
 - `screenscribe` (v0.7.3, marketplace 1.28.1): the skill declares what it takes and asks before it emits.
   - `argument-hint` in the frontmatter: a YouTube URL, a bare video id, a video already scribed, or nothing. `build` accepts a URL and a bare id equally — verified against yt-dlp, both resolve to the same id — so pasting the URL straight from the address bar needs no conversion, which is the common case.
   - A `## The argument` section routes it: a name already in the index starts at stage 2, a URL or id starts at stage 1, and anything else starts at stage 3 authoring from the idea. It sits below `## Script Location` because it invokes `$PY`/`$SC`, which that section binds.

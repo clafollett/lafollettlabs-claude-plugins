@@ -307,7 +307,7 @@ Watch: <video_id> 12:04-14:30
 The scribe is `BUNDLE.md`: the transcript with frame pointers.
 
 ```bash
-"$PY" "$SC" index                           # id, frames, size, length, last read, title
+"$PY" "$SC" index                           # id, frames, cues, size, length, last read, title
 "$PY" "$SC" index --json                    # adds url, pruned, reclaimable, path
 "$PY" "$SC" index --root ./bundles          # a library built with -o
 "$PY" "$SC" search "<term>"                 # every scribe, first 40 hits
@@ -318,6 +318,15 @@ The scribe is `BUNDLE.md`: the transcript with frame pointers.
 
 `index` scans the bundle root, so a new `build` appears with no bookkeeping.
 A bundle built with `-o` is not in that root — pass `--root`.
+
+The caption fetch is non-fatal, so a build can finish with every frame and no
+transcript. `index` shows `none` under CUES for those.
+
+```
+if the bundle you need has no cues:
+    say so before reading it — the frames carry no narration to pair with
+    re-running build is what fixes it
+```
 
 Naming a video, anywhere one is taken:
 

@@ -1,6 +1,7 @@
 ---
 name: plugin-janitor
 description: Remove cached plugin versions that no install points at. Use when the user asks to clean up the plugin cache, reclaim disk from ~/.claude/plugins, prune old or stale plugin versions, or asks why the cache keeps growing after marketplace updates. Also use to report plugins that are registered as installed but whose files are missing.
+argument-hint: "[nothing, to report | --yes, to delete]"
 ---
 
 # Plugin Janitor

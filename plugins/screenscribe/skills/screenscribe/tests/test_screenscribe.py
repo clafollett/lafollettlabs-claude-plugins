@@ -1827,6 +1827,25 @@ class TestIndex(LibraryCase):
         self.assertIn("BBB", out)
         self.assertIn("2 bundles", out)
 
+    def test_a_bundle_with_no_narration_is_flagged(self) -> None:
+        """The caption fetch is deliberately non-fatal, so a build can finish
+        with every frame and no transcript. Nothing downstream said so."""
+        self.bundle("AAA", frames=2, cues=())
+        out = self.index()
+        self.assertIn("none", out)
+        self.assertIn("no narration", out)
+
+    def test_a_bundle_with_narration_shows_its_count(self) -> None:
+        self.bundle("AAA", frames=2, cues=((0.0, "a"), (1.0, "b"), (2.0, "c")))
+        out = self.index()
+        self.assertRegex(out, r"AAA\s+2\s+3\s")
+        self.assertNotIn("no narration", out)
+
+    def test_the_count_reaches_the_json(self) -> None:
+        self.bundle("AAA", frames=2, cues=((0.0, "a"), (1.0, "b")))
+        rows = json.loads(self.invoke(sc.cmd_index, root=self.tmp, json=True))
+        self.assertEqual(rows[0]["cues"], 2)
+
     def test_a_bundle_with_no_frames_shows_zero(self) -> None:
         """An interrupted build, not a state prune can produce — a pruned
         bundle is not in the library at all."""
