@@ -380,6 +380,22 @@ class TestARegistryItCannotReadStopsEverything(CacheCase):
         self.assertFalse(old_.exists())
         self.assertIn("removed 1", out)
 
+    def test_a_relative_install_path_aborts(self) -> None:
+        """It resolves against the process cwd, so reachability would depend on
+        where janitor was run from. Beside one absolute entry — which keeps the
+        reachability guard quiet — it deleted a live install, and the
+        self-check stayed silent because the path was already counted as
+        dangling."""
+        rel = self.version("mk", "p", "2.0.0")
+        keep = self.version("mk", "q", "1.0.0", installed=True)
+        self.registry["plugins"]["p@mk"] = [
+            {"installPath": "cache/mk/p/2.0.0"}]
+        with self.assertRaises(SystemExit) as ctx:
+            self.run_it(yes=True)
+        self.assertIn("relative installPath", str(ctx.exception))
+        self.assertTrue(rel.is_dir())
+        self.assertTrue(keep.is_dir())
+
     def test_no_installs_beside_a_populated_cache_is_refused(self) -> None:
         """The wipe this guard was written for: registry says nothing is
         installed, so every version looks stale, so --yes takes all of them."""

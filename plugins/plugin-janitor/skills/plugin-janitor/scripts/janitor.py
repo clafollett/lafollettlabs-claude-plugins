@@ -134,6 +134,15 @@ def installed(root: Path) -> tuple[set[str], list[tuple[str, str, str]]]:
             raw = entry.get("installPath")
             if not raw:
                 continue
+            # An installPath is absolute. A relative one resolves against the
+            # process working directory, so whether an install looks reachable
+            # would depend on where janitor was run from — and beside one
+            # absolute entry, which keeps the reachability guard quiet, that
+            # deletes a live install with the self-check none the wiser,
+            # because the path is already accounted for as dangling.
+            if not Path(raw).is_absolute():
+                sys.exit(f"{root / REGISTRY}: {key!r} has a relative "
+                         f"installPath {raw!r}.\n  {SCHEMA_DRIFT}")
             path = Path(raw)
             resolved = str(path.resolve())
             live.add(resolved)
