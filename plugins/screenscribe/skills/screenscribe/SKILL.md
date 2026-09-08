@@ -1,6 +1,6 @@
 ---
 name: screenscribe
-description: Watch a video and write down what was actually on screen, then produce whatever the user needs from it. Use when the user wants Claude to "watch" a video or a span of one, references a tutorial, talk, screencast, or demo as the source of an idea, asks what was actually shown or run on screen, asks to review or critique a video, or wants a spec, review, summary, notes, walkthrough, or command list built from one. Also use to re-watch a span cited by an existing spec, story, or review, or to author a spec from a plain idea with no video. Do NOT use to transcribe or caption a video, or to work from its transcript without reading the frames.
+description: Watch a video and write down what was actually on screen, then produce whatever the user needs from it. Use when the user wants Claude to "watch" a video or a span of one, references a tutorial, talk, screencast, or demo as the source of an idea, asks what was actually shown or run on screen, asks to review or critique a video, or wants a spec, review, summary, notes, walkthrough, or command list built from one. Also use to re-watch a span cited by an existing spec, story, or review, to author a spec from a plain idea with no video, or to add a video the user has already watched to a growing set of notes they are building from. Do NOT use to transcribe or caption a video, or to work from its transcript without reading the frames.
 argument-hint: "[YouTube URL or video id | a video already scribed | nothing]"
 ---
 
@@ -217,6 +217,11 @@ commands, file paths, flags, versions, config values, error text.
 Where narration and frames disagree the frames win, and the disagreement is
 worth recording.
 
+The user has usually watched this video already; they are not the reader. Write
+for a later session with no memory of it, not a recap for the person who shared
+it. Keep the mechanism, the syntax, the numbers and the exact commands; cut "the
+speaker explains that…" and say what he showed.
+
 Say how many frames you read, and what you found, before going further. That
 report is what stage 4 asks against.
 
@@ -236,6 +241,18 @@ else:                                               AskUserQuestion, one call,
 | - | - |
 | what this becomes | the rows further down |
 | a page as well | no · a local HTML file in the bundle · a published Artifact |
+
+```
+if a page was chosen and no span was named:
+    AskUserQuestion again — a page needs a span, and the whole video is
+    rarely the answer
+```
+
+| Span | When |
+| - | - |
+| the screen-share segments | the default — where the payload is |
+| a range the user names | they know the part they mean |
+| the whole video | short videos only; a page over 12 MB will not publish |
 
 | Artifact | Shape |
 | - | - |
