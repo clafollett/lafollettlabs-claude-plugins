@@ -447,6 +447,18 @@ class TestIdentityNotSpelling(CacheCase):
         self.assertNotIn("THIS IS A BUG", out)
         self.assertTrue(d.is_dir())
 
+    def test_a_path_with_dot_dot_segments_is_not_stale(self) -> None:
+        """`os.stat` cannot walk through a missing intermediate component, so
+        `<cache>/mk/nothere/../keep/1.0.0` failed where the string comparison
+        this replaced normalised it lexically — the install was classed dangling
+        and the reachability guard refused the whole run over it."""
+        d = self.version("mk", "keep", "1.0.0")
+        odd = str(self.cache / "mk" / "nothere" / ".." / "keep" / "1.0.0")
+        self.registry["plugins"]["keep@mk"] = [{"installPath": odd}]
+        out = self.run_it(yes=True)
+        self.assertIn("nothing stale", out)
+        self.assertTrue(d.is_dir())
+
     def test_a_trailing_separator_is_not_stale(self) -> None:
         d = self.version("mkt", "plug", "1.0.0")
         self.registry["plugins"]["plug@mkt"] = [{"installPath": str(d) + os.sep}]
@@ -459,6 +471,33 @@ class TestIdentityNotSpelling(CacheCase):
         self.version("mkt", "plug", "2.0.0", installed=True)
         self.run_it(yes=True)
         self.assertFalse(old.exists())
+
+
+class TestNotKnowingIsNotGroundsForDeleting(CacheCase):
+    def test_a_version_whose_identity_is_unknown_is_not_stale(self) -> None:
+        """A stat that fails between the walk and the staleness test yields an
+        identity of None. None is in no set, so the version fell through to
+        stale and --yes deleted a live install — the self-check said so, after
+        the deletion."""
+        live = self.version("mk", "keep", "2.0.0", installed=True)
+        # A second reachable install, so the unreachable-registry guard cannot
+        # fire and mask the behaviour under test.
+        self.version("mk", "other", "1.0.0", installed=True)
+        real = j.ident
+        victim = os.path.realpath(live)
+        self.addCleanup(setattr, j, "ident", real)
+
+        def blind(path):
+            try:
+                unknown = os.path.realpath(path) == victim
+            except OSError:
+                unknown = False
+            return None if unknown else real(path)
+
+        j.ident = blind
+        out = self.run_it(yes=True)
+        self.assertNotIn("THIS IS A BUG", out)
+        self.assertTrue(live.is_dir())
 
 
 class TestThePlanIsReconciled(CacheCase):

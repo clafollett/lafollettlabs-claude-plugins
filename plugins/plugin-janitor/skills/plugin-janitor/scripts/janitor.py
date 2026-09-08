@@ -137,7 +137,12 @@ def installed(root: Path) -> tuple[set[str], list[tuple[str, str, str]]]:
             path = Path(raw)
             resolved = str(path.resolve())
             live.add(resolved)
-            if not path.is_dir():
+            # `is_dir` on the RESOLVED path, not the raw one. `resolve()`
+            # normalises `..` lexically; `stat` cannot walk through a missing
+            # intermediate component, so testing the raw string classed a real
+            # install as dangling and the reachability guard then refused the
+            # whole run over it.
+            if not Path(resolved).is_dir():
                 # Carried as (key, raw, resolved), not as a formatted string.
                 # The final self-check compares against `live`, which holds
                 # RESOLVED paths, and re-parsing a display line to recover one
@@ -162,7 +167,11 @@ def ident(path: str | Path) -> tuple[int, int] | None:
     Identity settles case, symlinks, trailing separators and `..` in one move.
     """
     try:
-        st = os.stat(path)
+        # `.resolve()` first, because `os.stat` cannot walk a path whose
+        # intermediate component is missing (`a/x/../b` with no `x`) while the
+        # string comparison this replaced normalised it lexically. Losing that
+        # would turn such an entry unreachable and refuse the whole run.
+        st = os.stat(Path(path).resolve())
     except OSError:
         return None
     return (st.st_dev, st.st_ino)
@@ -315,7 +324,15 @@ def main_with(args: argparse.Namespace) -> None:
     live, dangling = installed(root)
     every = versions(cache)
     installed_ids = {i for i in (ident(r) for r in live) if i is not None}
-    stale = [v for v in every if ident(v.path) not in installed_ids]
+    # `is not None` before the membership test, not just when building the set:
+    # filtering None out of `installed_ids` protects the set, and the predicate
+    # is what decides. A version whose stat fails between the walk above and
+    # here — ESTALE on a network home, an autofs timeout, a concurrent
+    # `marketplace update` — has an identity of None, None is in no set, and it
+    # would fall straight through to stale and be deleted. Not knowing what a
+    # directory is cannot be grounds for removing it.
+    stale = [v for v in every
+             if (i := ident(v.path)) is not None and i not in installed_ids]
     freed = sum(v.bytes for v in stale)
     empty = emptied(cache, stale, live)
 
