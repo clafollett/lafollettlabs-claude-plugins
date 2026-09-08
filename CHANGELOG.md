@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `screenscribe` (v0.7.2, marketplace 1.27.2): `prune`'s one-line help still read "evict frames, keeping the scribe" — the behaviour removed in v0.7.0. It is the line `--help` shows for the subcommand, so the only description of `prune` a user sees without drilling in described the wrong command.
 - `screenscribe` (v0.7.1, marketplace 1.27.1): `assets/spec-template.md` told an agent to re-open a cited span with `window <video_id> 12:04-14:30`, which argparse rejects — `window` takes `start` and `end` as two arguments. The hyphenated form is correct for the `Watch:` citation and wrong as a command, and the template used it for both, so every agent following it hit "the following arguments are required: end". Carried as INFO-002 since the v0.3.0 review; verified failing, then fixed.
 
 ### Removed

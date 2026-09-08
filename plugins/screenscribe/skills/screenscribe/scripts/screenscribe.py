@@ -1970,7 +1970,7 @@ def main() -> None:
                     help="stop after this many hits (0 for all, default 40)")
     s_.set_defaults(func=cmd_search)
 
-    pr = sub.add_parser("prune", help="evict frames, keeping the scribe")
+    pr = sub.add_parser("prune", help="remove a scribed video from the library")
     pr.add_argument("--root", type=Path, default=None, help=root_help)
     pr.add_argument("--id", action="append", default=[], metavar="VIDEO",
                     help=f"prune this video — video id, URL, or words from its title or channel; ambiguity is refused, "
