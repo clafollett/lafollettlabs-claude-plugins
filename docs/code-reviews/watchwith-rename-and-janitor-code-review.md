@@ -1,6 +1,6 @@
 # Code Review: watchwith-rename-and-janitor
 
-**Verdict:** 🚫 BLOCKED — round 2; see the latest round below
+**Verdict:** ✅ APPROVED at round 3 — round 4 pending on a post-approval fix
 
 | | |
 | - | - |
@@ -421,5 +421,50 @@ shipped. Both reviewers had read the round-1 remediation and called it
 plausible; both found the hole only by running it.
 
 39 -> 41 janitor tests.
+
+---
+
+## Review Round 3
+
+**Verdict:** ✅ APPROVED
+
+| | |
+| - | - |
+| **Reviewed SHA** | `9fe4036` |
+| **Round** | 3 |
+| **Date** | 2026-09-08 |
+
+All eight round-2 findings discharged, every one verified by execution rather
+than by reading the diff.
+
+| Check | Evidence |
+| - | - |
+| R2-HIGH-001 | `--yes` exits 1 on all four variants — `{"plugins":{}}`, all-dangling, relative `installPath`, unexpanded `~` — and does **not** fire on a healthy registry carrying a dangling entry alongside a live one |
+| flag rename | complete across script, help, docstring, tests, SKILL.md |
+| registry table row 4 | measured 0 / 0 / 1 for dry run / `--json` / `--yes`, report printed on all three |
+| stage 4 guard | now an `else`; the second ask fires only when a page is wanted and no span was named |
+| resolver | `HOME=<empty>` → `cannot resolve janitor.py`, exit 1 |
+
+The `reachable` subtraction was probed for path-form identity: `live` and
+`dangling`'s resolved member are computed in the same loop iteration from the
+same raw value, so the subtraction is exact by construction. Trailing slashes
+and `..` segments both resolve correctly.
+
+### LOW / INFO
+
+| ID | Finding | Disposition |
+| - | - | - |
+| R3-LOW-001 | CHANGELOG named `--allow-empty-registry` in the round-1 entry while the round-2 entry announced renaming it — one unreleased block, two names for one flag | fixed |
+| R3-LOW-002 | A third justification paragraph the table row above already stated verbatim | fixed |
+| R3-INFO-001 | **Pre-existing:** staleness decided by string equality, so a case-differing `installPath` on a case-insensitive filesystem deletes a live install | fixed — see round 4 |
+
+R3-INFO-001 was filed as awareness-only because it reproduces identically two
+commits earlier and was neither caused nor worsened by this work. It was fixed
+anyway: the failure mode is a deleted install, and macOS — where this most often
+runs — is case-insensitive by default. Reproduced before fixing: registry
+records `cache/MKT/plug/1.0.0`, disk holds `cache/mkt/plug/1.0.0`, `is_dir()`
+passes so the install is reachable and the guard is correctly silent, string
+equality then fails, the version is classed stale and removed, and the
+self-check reports `THIS IS A BUG` after the deletion.
 
 Generated with Claude Code
