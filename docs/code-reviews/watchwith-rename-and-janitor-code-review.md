@@ -1,6 +1,6 @@
 # Code Review: watchwith-rename-and-janitor
 
-**Verdict:** 🚫 BLOCKED
+**Verdict:** 🚫 BLOCKED — round 2; see the latest round below
 
 | | |
 | - | - |
@@ -329,5 +329,97 @@ would have shipped the wrong recommendation and broken the working resolver.
 The remediation for HIGH-001 was prototyped and executed before being written
 down: four wipe scenarios abort with the cache intact, 31 existing tests
 unchanged and passing.
+
+---
+
+## Review Round 2
+
+**Verdict:** 🚫 BLOCKED
+
+| | |
+| - | - |
+| **Reviewed SHA** | `19df02d` |
+| **Round** | 2 |
+| **Date** | 2026-09-08 |
+
+Round 2 existed to confirm round 1's fixes. It found that one of them was
+incomplete and that two of them introduced new defects — which is the argument
+for round 2 existing.
+
+### Discharge of round 1
+
+| Finding | Status |
+| - | - |
+| HIGH-001 | **PARTIAL** — see R2-HIGH-001 |
+| MEDIUM-001, 002, 004, 005, 006 | DISCHARGED |
+| MEDIUM-003 | PARTIAL — see R2-MEDIUM-001 / 002 |
+| LOW-002, LOW-003 | DISCHARGED |
+| LOW-004 | PARTIAL — `--yes` still documented twice |
+
+MEDIUM-006 was re-measured rather than assumed: with `CLAUDE_PLUGIN_ROOT` unset,
+the rewritten `## Run it` block was executed verbatim and resolved.
+
+### 🟠 R2-HIGH-001 — The round-1 guard tested the wrong invariant
+
+**Expert:** Primary + PE-Governance (independently, again) ·
+**Location:** `janitor.py:342` @ `19df02d`
+
+Round 1 refused when the registry named **no** installs. A registry naming
+sixteen, whose paths all point at a home directory that has since been renamed,
+parses fine, passes the new shape validation, and is equally useless as a
+reachability oracle.
+
+**Reproduced.** Three versions on disk, a registry whose `installPath`s all
+point at an old location: `versions 3 -> 0`, **exit 0**,
+`verified: 0/3 installs intact`. The same hole swallowed a relative
+`installPath` and an unexpanded `~`.
+
+This is a moved cache, a restored backup, a renamed account, or a changed path
+scheme — not a hypothetical. The tool printed "registered but missing" for every
+plugin it had, which is a screaming red flag, and then deleted the cache anyway.
+
+**Fixed:** the test is now whether *any* install resolves to a directory that
+exists — `reachable = live - {resolved for dangling}`. Verified across eight
+path forms including trailing slash, `..` segments, tilde, relative, and a live
+entry beside a dangling one (which must **not** refuse).
+
+### 🟡 R2-MEDIUM-001 — Restoring stage 4's accumulators broke the guard above them
+
+`if the user asked a question: answer inline, ask nothing` became a bare `if`
+with the accumulator following unconditionally, so a question-asker accumulated
+both rows and `AskUserQuestion` fired one line beneath the words "ask nothing".
+Fixed with an `else`.
+
+### 🟡 R2-MEDIUM-002 — Consolidating the span question made it unreachable
+
+Whether a page is wanted is unknown while the page question is still open, so
+`if a page is wanted: open += "which span"` never fires on the path that needs
+it: user says nothing, answers both rows, picks a published Artifact, and is
+never asked for a span. The round-1 text asked it in a follow-up call, which
+folding everything into one call destroyed. Restored as a second call.
+
+### 🟡 R2-MEDIUM-003 — The registry table said "abort" for two different behaviours
+
+**Measured:** rows 1-3 abort on every path (`exit 1` for dry run, `--json` and
+`--yes`); row 4 aborts only on `--yes` and still prints the report. Row 4 now
+says so.
+
+### LOW / INFO
+
+| ID | Finding |
+| - | - |
+| R2-LOW-001 | A benign schema addition aborted with a bare "refusing to guess", reading as a registry bug rather than a tool a version behind the format |
+| R2-LOW-002 | "the notes" collided with the `summary / notes` artifact and `docs/notes/` in the same stage; the gate now names stage 3 |
+| R2-LOW-003 | Two justification paragraphs whose removal changed no behaviour, one duplicating a comment in `janitor.py` |
+| R2-LOW-004 | janitor's resolver lacked watchwith's `find ~/.claude/skills` fallback |
+| R2-INFO-001 | `--allow-empty-registry` renamed `--allow-unreachable-registry`; the condition stopped being emptiness, and the flag had reached no one at 0.1.4 |
+
+### Notes on Method
+
+The HIGH was found twice again, independently, on a fix that had already
+shipped. Both reviewers had read the round-1 remediation and called it
+plausible; both found the hole only by running it.
+
+39 -> 41 janitor tests.
 
 Generated with Claude Code
