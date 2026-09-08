@@ -32,7 +32,7 @@ htmlcov/
 *.bak
 *.log
 
-# screenscribe bundles — downloaded video frames, never committed
+# watchwith bundles — downloaded video frames, never committed
 bundles/
 
 # Playwright MCP scratch output (screenshots, snapshots, console logs)

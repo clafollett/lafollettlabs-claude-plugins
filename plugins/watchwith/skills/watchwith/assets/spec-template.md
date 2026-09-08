@@ -68,12 +68,12 @@ a state, not a task.
 ## Provenance
 
 - Video: <url>
-- Bundle: `<video_id>` (under the screenscribe bundle root)
+- Bundle: `<video_id>` (under the watchwith bundle root)
 - Deviations from source: <what differs, and why>
 
 Each key moment cites a span, not a memory. An agent picking this up re-opens it:
 
-Re-open a span with the screenscribe skill — it resolves the script:
+Re-open a span with the watchwith skill — it resolves the script:
 `window <video_id> 12:04 14:30`
 
 | Watch | What was on screen | Feeds |

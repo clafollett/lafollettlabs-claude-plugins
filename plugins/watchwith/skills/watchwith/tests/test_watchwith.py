@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for screenscribe. Stdlib only — run with:
+"""Tests for watchwith. Stdlib only — run with:
 
     python3 -m unittest discover -s tests -v
 
@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-import screenscribe as sc  # noqa: E402
+import watchwith as sc  # noqa: E402
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None
 try:

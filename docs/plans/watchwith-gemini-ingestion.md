@@ -1,7 +1,7 @@
-# Plan: Gemini video ingestion for `screenscribe`
+# Plan: Gemini video ingestion for `watchwith`
 
 **Status:** DECIDED 2026-09-07 — option B. `--gemini` cut before release.
-**Affects:** `plugins/screenscribe/skills/screenscribe/scripts/screenscribe.py`
+**Affects:** `plugins/watchwith/skills/watchwith/scripts/watchwith.py`
 **Written:** 2026-09-07
 
 > ## Decision
@@ -58,7 +58,7 @@ Three things, in order of urgency:
 
 ## Background
 
-`screenscribe.py` builds a bundle: scene-change keyframes interleaved with
+`watchwith.py` builds a bundle: scene-change keyframes interleaved with
 timestamped narration, so Claude sees the on-screen content a transcript omits.
 `--gemini` was added as an optional second pass — Gemini ingests the YouTube URL
 natively and returns a verbatim extraction of on-screen code and commands, saved
@@ -225,14 +225,14 @@ whether derived evidence is trustworthy enough to cite in a spec.
 ## Open questions
 
 1. Does `--gemini` justify being the plugin's only external-API dependency, or
-   does it belong in a separate plugin so `screenscribe` stays self-contained?
+   does it belong in a separate plugin so `watchwith` stays self-contained?
 2. Where does `GEMINI_API_KEY` come from, and what does the skill do when it's
    absent — silent skip (current behavior) or hard fail? Silent skip means a
    bundle can be quietly missing a section the spec assumed was there.
 3. Does the ToS position change if the Gemini path replaces `yt-dlp`? Passing a
    URL to Google's API is a different act from downloading the stream. Worth a
    real answer, since it affects whether any of this can go near Corebizy.
-4. If we go with D, does `screenscribe.py` still need `yt-dlp` at all, or can
+4. If we go with D, does `watchwith.py` still need `yt-dlp` at all, or can
    frame extraction run against a stream URL without a full download?
 
 
@@ -259,7 +259,7 @@ Still open:
 
 1. **`docs/specs/` vs `issue-manager`'s `docs/epics/`.** Both turn intent into
    structured work items. A spec that becomes an Epic plus Stories is a
-   plausible chain. Decide whether screenscribe emits into issue-manager's flow or
+   plausible chain. Decide whether watchwith emits into issue-manager's flow or
    stays parallel. The `Watch:` provenance directive is designed to survive that
    hand-off either way — an Epic or Story can carry it unchanged.
 2. **Does stage 1 belong in this plugin at all?** The spec template and quality

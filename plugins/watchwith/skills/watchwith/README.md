@@ -1,4 +1,4 @@
-# Screenscribe
+# Watchwith
 
 Automates the watching and the scribing: Claude watches a video and writes down
 what was actually on screen, so you can build anything from it.
@@ -124,7 +124,7 @@ It returned `extraction.md`: Gemini's reading of the video, already compressed.
 That is derived evidence, and it fails for the same reason a transcript does —
 a spec citing it cites a claim, where a spec citing a frame cites a source. It
 also carried the plugin's only API key, its only second vendor, and a code path
-that had never executed. `docs/plans/screenscribe-gemini-ingestion.md` holds the
+that had never executed. `docs/plans/watchwith-gemini-ingestion.md` holds the
 full analysis and the follow-up worth building: let Gemini pick *which
 timestamps matter*, then cut frames there with ffmpeg and read the pixels
 ourselves. Selection is the part it is genuinely better at.
@@ -155,8 +155,8 @@ pass.
 
 ```bash
 brew install ffmpeg deno     # or the platform's package manager
-python3 -m venv ~/.screenscribe/venv
-~/.screenscribe/venv/bin/pip install -q yt-dlp imagehash pillow curl_cffi
+python3 -m venv ~/.watchwith/venv
+~/.watchwith/venv/bin/pip install -q yt-dlp imagehash pillow curl_cffi
 ```
 
 `curl_cffi` and `deno` are not imported by this script, and `build` does not
@@ -177,7 +177,7 @@ first.
 The venv lives under `$HOME`, deliberately not in `~/.claude/plugins/cache/`:
 that directory holds versions side by side and gets a fresh one on every plugin
 update, so anything installed there is orphaned immediately. The skill runs
-`screenscribe.py bootstrap`, which creates the venv when it is missing, installs
+`watchwith.py bootstrap`, which creates the venv when it is missing, installs
 anything absent, and prints the interpreter path the skill then binds.
 
 For developing this repo, a throwaway `.venv` at the repo root is enough — it is
@@ -185,7 +185,7 @@ gitignored, and the test suite is stdlib-only apart from `imagehash`/`pillow`:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -q imagehash pillow
-.venv/bin/python -m unittest discover -s plugins/screenscribe/skills/screenscribe/tests
+.venv/bin/python -m unittest discover -s plugins/watchwith/skills/watchwith/tests
 ```
 
 ## The shareable page
@@ -214,7 +214,7 @@ so the page never implies narration that does not exist.
 
 ## Where bundles live
 
-`-o <path>`, else `$SCREENSCRIBE_BUNDLES`, else `~/.screenscribe/bundles`.
+`-o <path>`, else `$WATCHWITH_BUNDLES`, else `~/.watchwith/bundles`.
 
 The default is under `$HOME` rather than the working directory on purpose. A
 bundle runs 100-240 MB, so a cwd-relative default drops that into whatever repo
@@ -226,7 +226,7 @@ downloaded once instead of three times.
 from any working directory:
 
 ```bash
-screenscribe.py window 3sHNpzgNCYY 12:04 14:30
+watchwith.py window 3sHNpzgNCYY 12:04 14:30
 ```
 
 Pass `-o ./bundles` when you want the bundle to live with the project.

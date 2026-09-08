@@ -1,10 +1,10 @@
 ---
-name: screenscribe
+name: watchwith
 description: Watch a video and write down what was actually on screen, then produce whatever the user needs from it. Use when the user wants Claude to "watch" a video or a span of one, references a tutorial, talk, screencast, or demo as the source of an idea, asks what was actually shown or run on screen, asks to review or critique a video, or wants a spec, review, summary, notes, walkthrough, or command list built from one. Also use to re-watch a span cited by an existing spec, story, or review, to author a spec from a plain idea with no video, or to add a video the user has already watched to a growing set of notes they are building from. Do NOT use to transcribe or caption a video, or to work from its transcript without reading the frames.
 argument-hint: "[YouTube URL or video id | a video already scribed | nothing]"
 ---
 
-# Screenscribe
+# Watchwith
 
 Automate the watching and the scribing. Frames are the payload; the transcript
 names them.
@@ -12,8 +12,8 @@ names them.
 ## Pipeline
 
 ```
-1. BUILD       video -> bundle/         screenscribe.py build
-2. WATCH       bundle + span -> you     screenscribe.py window, then Read each frame
+1. BUILD       video -> bundle/         watchwith.py build
+2. WATCH       bundle + span -> you     watchwith.py window, then Read each frame
 3. SCRIBE      pixels -> what was there notes anchored to timestamps
 4. EMIT        that -> the artifact     whatever the user asked for
 ```
@@ -31,7 +31,7 @@ under `installPath`. Resolve the script:
 SC=$(python3 -c "
 import json, pathlib, sys
 reg = pathlib.Path.home() / '.claude/plugins/installed_plugins.json'
-rel = 'skills/screenscribe/scripts/screenscribe.py'
+rel = 'skills/watchwith/scripts/watchwith.py'
 market = 'lafollett-labs-claude-plugins'
 try:
     plugins = json.loads(reg.read_text()).get('plugins', {})
@@ -42,7 +42,7 @@ except Exception:
 found = []
 for key, entries in plugins.items():
     name, _, mkt = key.partition('@')
-    if name != 'screenscribe':
+    if name != 'watchwith':
         continue
     for entry in entries or []:
         if not isinstance(entry, dict):
@@ -61,10 +61,10 @@ sys.exit(1)
 
 # Fallback for manual install.
 # `|| true` is load-bearing: find exits 1 with no ~/.claude/skills, killing `set -e` callers.
-[ -z "$SC" ] && SC=$(find ~/.claude/skills -path "*/screenscribe/scripts/screenscribe.py" -print -quit 2>/dev/null || true)
+[ -z "$SC" ] && SC=$(find ~/.claude/skills -path "*/watchwith/scripts/watchwith.py" -print -quit 2>/dev/null || true)
 
 if [ -z "$SC" ]; then
-  echo "screenscribe: cannot resolve screenscribe.py — checked installed_plugins.json and ~/.claude/skills" >&2
+  echo "watchwith: cannot resolve watchwith.py — checked installed_plugins.json and ~/.claude/skills" >&2
   exit 1
 fi
 
@@ -76,10 +76,10 @@ SKILL_DIR=$(dirname "$(dirname "$SC")")
 # installs whatever is missing, prints the interpreter path, and is idempotent.
 # First run installs four packages — allow 300s.
 PY=$(python3 "$SC" bootstrap) || {
-  echo "screenscribe: bootstrap failed — see the messages above" >&2
+  echo "watchwith: bootstrap failed — see the messages above" >&2
   exit 1
 }
-[ -x "$PY" ] || { echo "screenscribe: bootstrap printed '$PY', not an interpreter" >&2; exit 1; }
+[ -x "$PY" ] || { echo "watchwith: bootstrap printed '$PY', not an interpreter" >&2; exit 1; }
 ```
 
 ## The argument
@@ -128,8 +128,8 @@ Produces `<root>/<video_id>/` → `BUNDLE.md`, `frames/`, `meta.json`.
 | Bundle root | Precedence |
 | - | - |
 | `-o <path>` | wins |
-| `$SCREENSCRIBE_BUNDLES` | used when `-o` is absent |
-| `~/.screenscribe/bundles` | default |
+| `$WATCHWITH_BUNDLES` | used when `-o` is absent |
+| `~/.watchwith/bundles` | default |
 
 Use `-o` only when the user wants the bundle to live with the project.
 
@@ -152,7 +152,7 @@ while each line was spoken. It is text, so read it or grep it.
 the file is never in the working directory:
 
 ```bash
-BUNDLE=<the path on build's [done] line>   # resolves -o and $SCREENSCRIBE_BUNDLES
+BUNDLE=<the path on build's [done] line>   # resolves -o and $WATCHWITH_BUNDLES
 ```
 
 | Want | Do |

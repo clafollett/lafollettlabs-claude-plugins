@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-screenscribe — turn a tutorial video into a bundle Claude can actually *watch*.
+watchwith — turn a tutorial video into a bundle Claude can actually *watch*.
 
 Transcripts drop the payload. In a screencast the information lives in the pixels
 (terminal, file tree, IDE state, diagrams), so we sample frames at a fixed rate,
@@ -29,14 +29,14 @@ Install:
     ffmpeg must be on PATH
 
 Usage:
-    ./screenscribe.py build "https://youtu.be/VIDEO_ID"
-    ./screenscribe.py build "<url>" --fps 2 --phash-distance 4
-    ./screenscribe.py window bundles/VIDEO_ID 12:00 18:00
+    ./watchwith.py build "https://youtu.be/VIDEO_ID"
+    ./watchwith.py build "<url>" --fps 2 --phash-distance 4
+    ./watchwith.py window bundles/VIDEO_ID 12:00 18:00
 
-Bundles are written to --out, else $SCREENSCRIBE_BUNDLES, else ~/.screenscribe/bundles.
+Bundles are written to --out, else $WATCHWITH_BUNDLES, else ~/.watchwith/bundles.
 `window` also accepts a bare video id, resolved against that root:
 
-    ./screenscribe.py window VIDEO_ID 12:00 18:00
+    ./watchwith.py window VIDEO_ID 12:00 18:00
 
 Pass `-o ./bundles` when you want the bundle to live with the project instead.
 """
@@ -170,7 +170,7 @@ NOISE_HOST_PATHS = (
 # Substrings anywhere in the URL. Only for markers that are unambiguous.
 NOISE_MARKERS = ("sub_confirmation",)
 
-# Where bundles live: --out, then $SCREENSCRIBE_BUNDLES, then ~/.screenscribe/bundles.
+# Where bundles live: --out, then $WATCHWITH_BUNDLES, then ~/.watchwith/bundles.
 #
 # The default is under $HOME, not ./bundles, for two reasons. A bundle runs
 # 100-240 MB, so a cwd-relative default drops that into whatever repo you happen
@@ -178,8 +178,8 @@ NOISE_MARKERS = ("sub_confirmation",)
 # entry. And one video often informs several projects, so a single library means
 # one download instead of one per checkout. Pass `-o ./bundles` when you do want
 # the bundle to live with the work.
-BUNDLES_ENV = "SCREENSCRIBE_BUNDLES"
-DEFAULT_BUNDLES = Path("~/.screenscribe/bundles")
+BUNDLES_ENV = "WATCHWITH_BUNDLES"
+DEFAULT_BUNDLES = Path("~/.watchwith/bundles")
 
 # The runtime venv, and the packages that go in it. Never inside
 # ~/.claude/plugins/cache/ — that directory is replaced on every plugin update.
@@ -188,7 +188,7 @@ DEFAULT_BUNDLES = Path("~/.screenscribe/bundles")
 # the script imports; OPTIONAL is what yt-dlp picks up when it is there:
 # curl_cffi supplies the impersonation target whose absence draws rate limits
 # sooner. `deno` is the other optional piece and cannot be pip-installed.
-DEFAULT_VENV = Path("~/.screenscribe/venv")
+DEFAULT_VENV = Path("~/.watchwith/venv")
 REQUIRED_DEPS = {"yt_dlp": "yt-dlp", "imagehash": "imagehash", "PIL": "pillow"}
 OPTIONAL_DEPS = {"curl_cffi": "curl_cffi"}
 
@@ -961,7 +961,7 @@ def build_bundle(meta: dict, cues: list[Cue], frames: list[Frame], out: Path) ->
         "> Navigation map. The frames are the payload and are NOT inlined here —",
         "> reading this file alone is not watching the video.",
         ">",
-        "> Read a span with the screenscribe skill, which resolves the script:",
+        "> Read a span with the watchwith skill, which resolves the script:",
         f"> `window {meta['id']} <START> <END>`",
         "",
     ]
@@ -1740,7 +1740,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> None:
     """Create the runtime venv and install what is missing. Idempotent.
 
     Prints the interpreter path on stdout and nothing else, so a caller can bind
-    it directly:  PY=$(python3 screenscribe.py bootstrap)
+    it directly:  PY=$(python3 watchwith.py bootstrap)
 
     Progress goes to stderr for that reason. Runs on a bare system python3 — it
     imports only the standard library, because on a fresh plugin install nothing
