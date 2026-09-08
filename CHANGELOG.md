@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A `## The argument` section routes it: a name already in the index starts at stage 2, a URL or id starts at stage 1, and anything else starts at stage 3 authoring from the idea. It sits below `## Script Location` because it invokes `$PY`/`$SC`, which that section binds.
   - Stage 4 now calls `AskUserQuestion` when the user has not said what they want, instead of picking an artifact shape for them — one call covering both the shape and whether a page is wanted.
   - The page section names its destination as a choice rather than assuming publication: a local HTML file in the bundle, or a published Artifact. The page embeds another author's frames, so publishing is republishing; the local file is the default when the answer is unclear.
+  - Two conditionals in the new sections were written as prose and are now pseudocode: the argument that carries both a video and an instruction, and the fallback to a local file when the page destination stays unclear. The argument block also had the branches in the wrong order — the video/instruction split has to happen before the routing that consumes it.
   - `disable-model-invocation` was considered and deliberately not set. Screenscribe's citation discipline depends on a later session auto-triggering on a `Watch:` span it finds in a spec; disabling that would leave it working from the prose summary, which the same section forbids.
 
 ### Added

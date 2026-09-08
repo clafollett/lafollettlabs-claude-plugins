@@ -93,14 +93,13 @@ converting.
 ```
 
 ```
-if it names a video in the index:  stage 2, that bundle
-elif it is a URL or a video id:    stage 1, then stage 2
-elif it names no video at all:     stage 3, authoring from the idea
-```
+if the argument carries a video AND an instruction:
+    the video selects the bundle; the rest is the brief for stage 4
 
-An argument carrying both a video and an instruction ("...— build the bundle,
-this is the origin of the riff repo") is one of each: the video selects the
-bundle, the rest is the brief for stage 4.
+if the video names one in the index:  stage 2, that bundle
+elif it is a URL or a video id:       stage 1, then stage 2
+elif there is no video at all:        stage 3, authoring from the idea
+```
 
 ## Stage 1 — build
 
@@ -259,11 +258,12 @@ user's call, and the two are not the same act:
 | the Artifact tool | published to claude.ai and reachable by link |
 
 ```
-if the user has not said which:  ask
+if the user said which:  that one
+else:                    ask
+if still unclear:        the local file
 ```
 
-The page embeds another author's frames, so publishing is republishing. Default
-to the local file when the answer is unclear.
+Publishing is republishing — the page carries another author's frames.
 
 ```bash
 "$PY" "$SC" artifact <video_id> 3:37 6:27 -o ./rebase-walkthrough.html
