@@ -23,6 +23,9 @@ Usage:
     ./janitor.py            # what would go, and what it would free
     ./janitor.py --yes      # actually remove it
     ./janitor.py --json     # machine-readable, never deletes
+
+A registry that lists no installs at all is refused rather than treated as "every
+version is stale" — pass --allow-empty-registry when nothing really is installed.
 """
 
 from __future__ import annotations
@@ -102,11 +105,23 @@ def installed(root: Path) -> tuple[set[str], list[tuple[str, str, str]]]:
     if not isinstance(data, dict):
         sys.exit(f"{root / REGISTRY} is not a JSON object — refusing to guess")
 
+    # Every branch below exits rather than skipping. A shape this function does
+    # not recognise is indistinguishable from a schema it has not been taught,
+    # and the failure mode of guessing is that `live` comes back empty and every
+    # cached version looks unreachable — which is the whole cache.
+    plugins = data.get("plugins")
+    if not isinstance(plugins, dict):
+        sys.exit(f"{root / REGISTRY} has no 'plugins' object — refusing to guess")
+
     live, dangling = set(), []
-    for key, entries in (data.get("plugins") or {}).items():
-        for entry in entries or []:
+    for key, entries in plugins.items():
+        if not isinstance(entries, list):
+            sys.exit(f"{root / REGISTRY}: {key!r} is not a list of installs — "
+                     f"refusing to guess")
+        for entry in entries:
             if not isinstance(entry, dict):
-                continue
+                sys.exit(f"{root / REGISTRY}: {key!r} holds a non-object entry — "
+                         f"refusing to guess")
             raw = entry.get("installPath")
             if not raw:
                 continue
@@ -151,7 +166,20 @@ def _dirs(path: Path) -> list[Path]:
         return []
 
 
-def emptied(cache: Path, going: list[Version]) -> list[Path]:
+def claimed(path: Path, registered: set[str]) -> bool:
+    """True when some `installPath` still points inside `path`.
+
+    A registered-but-missing plugin has an entry and no files, and its
+    `<plugin>` directory is empty for that reason. `janitor does not touch
+    these` is what the report says while naming it, so the sweep has to agree:
+    the fix for a dangling entry is a reinstall or removing the entry, and
+    neither is helped by deleting the directory the reinstall wants.
+    """
+    root = str(path.resolve())
+    return any(r == root or r.startswith(root + os.sep) for r in registered)
+
+
+def emptied(cache: Path, going: list[Version], registered: set[str]) -> list[Path]:
     """Plugin and marketplace directories holding nothing once `going` is gone.
 
     `versions` names things exactly three levels down, so the `<plugin>`
@@ -160,17 +188,19 @@ def emptied(cache: Path, going: list[Version]) -> list[Path]:
     the same litter this tool exists to remove, in the one shape it could not
     see. A `<marketplace>` whose last plugin goes has the same problem.
 
-    Directories that are already empty count: they got that way by the same
-    route, and nothing else is ever going to mention them.
+    Directories that were already empty count too — `_holds_only` is vacuously
+    true on them. They got that way by the same route, and nothing else is ever
+    going to mention them.
 
     Plugin directories lead the returned list. A marketplace is not empty until
     they are gone, and `prune` walks the list in order.
     """
     doomed = {v.path for v in going}
     plugins = sorted(p for m in _dirs(cache) for p in _dirs(m)
-                     if _holds_only(p, doomed))
+                     if _holds_only(p, doomed) and not claimed(p, registered))
     doomed |= set(plugins)
-    markets = sorted(m for m in _dirs(cache) if _holds_only(m, doomed))
+    markets = sorted(m for m in _dirs(cache)
+                     if _holds_only(m, doomed) and not claimed(m, registered))
     return plugins + markets
 
 
@@ -240,6 +270,9 @@ def main() -> None:
                     help="actually delete; without it this is a dry run")
     ap.add_argument("--json", action="store_true",
                     help="machine-readable report; never deletes")
+    ap.add_argument("--allow-empty-registry", action="store_true",
+                    help="delete even when the registry lists no installs at "
+                         "all; without it that case is refused")
     main_with(ap.parse_args())
 
 
@@ -253,7 +286,7 @@ def main_with(args: argparse.Namespace) -> None:
     every = versions(cache)
     stale = [v for v in every if str(v.path.resolve()) not in live]
     freed = sum(v.bytes for v in stale)
-    empty = emptied(cache, stale)
+    empty = emptied(cache, stale, live)
 
     if args.json:
         print(json.dumps({
@@ -300,6 +333,22 @@ def main_with(args: argparse.Namespace) -> None:
         print("dry run — nothing removed. Re-run with --yes to delete.")
         return
 
+    # Deliberately below the dry run and the --json report, so the plan is
+    # always visible and only the deletion is gated. An empty registry beside a
+    # populated cache is genuinely ambiguous: it is what "the user uninstalled
+    # everything" looks like, and equally what "this tool can no longer read the
+    # registry" looks like. The second is unrecoverable by the person who would
+    # have to notice, so it decides the default.
+    if every and not live and not args.allow_empty_registry:
+        sys.exit(f"{root / REGISTRY} lists no installs, but {cache} holds "
+                 f"{len(every)} version{'s' if len(every) != 1 else ''}.\n"
+                 f"  Every one of them looks unreachable — which is also exactly "
+                 f"how a registry this tool\n"
+                 f"  cannot read would look. Refusing to delete the whole cache "
+                 f"on that basis.\n"
+                 f"  If nothing really is installed, re-run with "
+                 f"--allow-empty-registry.")
+
     done = [v for v in stale if remove(v, cache)]
     if stale:
         # Recomputed from what actually went, not from the plan: a refusal must
@@ -308,10 +357,16 @@ def main_with(args: argparse.Namespace) -> None:
 
     # Recomputed against the filesystem the removals just left, so a version
     # that refused to go keeps the directory above it.
-    swept = [d for d in emptied(cache, done) if prune(d, cache)]
+    swept = [d for d in emptied(cache, done, live) if prune(d, cache)]
     if swept:
         print(f"pruned {len(swept)} empty "
               f"director{'y' if len(swept) == 1 else 'ies'}")
+    if len(swept) < len(empty):
+        # The plan named these; a refusal above means they still hold something.
+        # Saying nothing would leave the printed plan quietly unfulfilled.
+        print(f"{len(empty) - len(swept)} planned "
+              f"director{'y' if len(empty) - len(swept) == 1 else 'ies'} kept — "
+              f"still holding something the sweep could not take")
 
     gone = [p for p in sorted(live) if not Path(p).is_dir()]
     already = {resolved for _, _, resolved in dangling}

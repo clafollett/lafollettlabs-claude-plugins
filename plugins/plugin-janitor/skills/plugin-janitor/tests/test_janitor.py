@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -45,7 +46,8 @@ class CacheCase(unittest.TestCase):
     def run_it(self, **kw):
         self.write_registry()
         import argparse
-        opts = dict(root=self.tmp, yes=False, json=False)
+        opts = dict(root=self.tmp, yes=False, json=False,
+                    allow_empty_registry=False)
         opts.update(kw)
         buf = io.StringIO()
         with redirect_stdout(buf):
@@ -96,7 +98,8 @@ class TestItRefusesToGuess(CacheCase):
             with redirect_stdout(io.StringIO()):
                 import argparse
                 j.main_with(argparse.Namespace(root=self.tmp, yes=True,
-                                               json=False))
+                                               json=False,
+                                               allow_empty_registry=False))
         self.assertIn("refusing", str(ctx.exception))
 
     def test_a_corrupt_registry_stops_everything(self) -> None:
@@ -106,7 +109,8 @@ class TestItRefusesToGuess(CacheCase):
             with redirect_stdout(io.StringIO()):
                 import argparse
                 j.main_with(argparse.Namespace(root=self.tmp, yes=True,
-                                               json=False))
+                                               json=False,
+                                               allow_empty_registry=False))
 
     def test_a_registry_that_is_not_an_object_stops_everything(self) -> None:
         self.version("mk", "thing", "1.0.0")
@@ -115,7 +119,8 @@ class TestItRefusesToGuess(CacheCase):
             with redirect_stdout(io.StringIO()):
                 import argparse
                 j.main_with(argparse.Namespace(root=self.tmp, yes=True,
-                                               json=False))
+                                               json=False,
+                                               allow_empty_registry=False))
 
 
 class TestDepthIsTheSignature(CacheCase):
@@ -317,6 +322,101 @@ class TestPruneRefuses(CacheCase):
             self.assertFalse(j.prune(self.cache / "mk" / "thing", self.cache))
         self.assertIn("skipped", buf.getvalue())
         self.assertTrue((self.cache / "mk" / "thing").is_dir())
+
+
+class TestARegistryItCannotReadStopsEverything(CacheCase):
+    """The guard exists because an unreadable registry makes the whole cache
+    look unreachable. Parsing is not reading: a file can be valid JSON and a
+    dict and still name no installs, and the first version of this guard let
+    every one of those through to `--yes`."""
+
+    def shapes(self):
+        return [
+            ("plugins is null", {"plugins": None}),
+            ("plugins is a list", {"plugins": []}),
+            ("entries became an object", {"plugins": {"a@mk": {"installPath": "/x"}}}),
+            ("entry is a bare string", {"plugins": {"a@mk": ["/x"]}}),
+        ]
+
+    def test_every_unrecognised_shape_aborts_with_the_cache_intact(self) -> None:
+        for label, reg in self.shapes():
+            with self.subTest(shape=label):
+                d = self.version("mk", "thing", "1.0.0")
+                (self.tmp / j.REGISTRY).write_text(json.dumps(reg), encoding="utf-8")
+                import argparse
+                with self.assertRaises(SystemExit) as ctx:
+                    with redirect_stdout(io.StringIO()):
+                        j.main_with(argparse.Namespace(
+                            root=self.tmp, yes=True, json=False,
+                            allow_empty_registry=False))
+                self.assertIn("refusing to guess", str(ctx.exception))
+                self.assertTrue(d.is_dir())
+                shutil.rmtree(self.cache); self.cache.mkdir()
+
+    def test_no_installs_beside_a_populated_cache_is_refused(self) -> None:
+        """The wipe this guard was written for: registry says nothing is
+        installed, so every version looks stale, so --yes takes all of them."""
+        a = self.version("mk", "one", "1.0.0")
+        b = self.version("mk", "two", "2.0.0")
+        with self.assertRaises(SystemExit) as ctx:
+            self.run_it(yes=True)
+        self.assertIn("Refusing to delete the whole cache", str(ctx.exception))
+        self.assertTrue(a.is_dir())
+        self.assertTrue(b.is_dir())
+
+    def test_the_dry_run_still_reports_it(self) -> None:
+        """The plan stays visible — only the deletion is gated."""
+        self.version("mk", "one", "1.0.0")
+        out = self.run_it()
+        self.assertIn("1.0.0", out)
+        self.assertIn("dry run", out)
+
+    def test_the_escape_hatch_is_its_own_flag(self) -> None:
+        """Someone who really did uninstall everything can still sweep."""
+        a = self.version("mk", "one", "1.0.0")
+        out = self.run_it(yes=True, allow_empty_registry=True)
+        self.assertFalse(a.exists())
+        self.assertIn("removed 1", out)
+
+    def test_yes_alone_does_not_imply_it(self) -> None:
+        self.version("mk", "one", "1.0.0")
+        with self.assertRaises(SystemExit):
+            self.run_it(yes=True, allow_empty_registry=False)
+
+
+class TestItLeavesRegisteredDirectoriesAlone(CacheCase):
+    def test_a_dangling_installs_empty_directory_survives(self) -> None:
+        """The report names it as untouched in the same run. Deleting it made
+        the tool contradict itself, and helped no reinstall."""
+        shell = self.cache / "mk" / "ghost"
+        shell.mkdir(parents=True)
+        self.registry["plugins"]["ghost@mk"] = [
+            {"installPath": str(shell / "0.1.0")}]
+        self.version("mk", "kept", "2.0.0", installed=True)
+        out = self.run_it(yes=True)
+        self.assertIn("registered but missing", out)
+        self.assertTrue(shell.is_dir())
+
+    def test_an_unregistered_empty_directory_still_goes(self) -> None:
+        shell = self.cache / "mk" / "orphan"
+        shell.mkdir(parents=True)
+        self.version("mk", "kept", "2.0.0", installed=True)
+        self.run_it(yes=True)
+        self.assertFalse(shell.exists())
+
+
+class TestThePlanIsReconciled(CacheCase):
+    def test_a_directory_the_plan_promised_but_kept_is_reported(self) -> None:
+        """A refusal used to leave the printed plan quietly unfulfilled."""
+        old = self.version("mk", "gone", "1.0.0")
+        self.version("mk", "kept", "2.0.0", installed=True)
+        (old / "NOTES.md").write_text("x")
+        os.chmod(old, 0o555)
+        self.addCleanup(os.chmod, old, 0o755)
+        out = self.run_it(yes=True)
+        self.assertIn("mk/gone", out)
+        self.assertIn("kept", out)
+        self.assertTrue((self.cache / "mk" / "gone").is_dir())
 
 
 class TestHuman(unittest.TestCase):

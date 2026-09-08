@@ -158,9 +158,9 @@ BUNDLE=<the path on build's [done] line>   # resolves -o and $WATCHWITH_BUNDLES
 | Want | Do |
 | - | - |
 | a topic anywhere in the video | `grep -n -B3 -A3 '<term>' "$BUNDLE"`, then Read the frames on the hits |
-| a topic in some video, you forget which | `search "<term>"` — every scribe in the library |
+| a topic in some video, you forget which | `"$PY" "$SC" search "<term>"` — every bundle in the library |
 | every readable frame | `grep -n 'FRAME frames/' "$BUNDLE"` |
-| a span end to end | `window <id> <start> <end>`, then Read every `FRAME` path |
+| a span end to end | `"$PY" "$SC" window <id> <start> <end>`, then Read every `FRAME` path |
 | where the payload is | the "Screen-share segments" table at the top |
 
 A `FRAME` line's path is literal. Frames are named for the second they came
@@ -227,26 +227,27 @@ report is what stage 4 asks against.
 
 ## Stage 4 — emit
 
-An instruction given before the scribe existed was a guess — the user had not
-seen the frames yet. It does not count as an answer.
+An instruction given before the notes existed was a guess — the user had not
+seen the frames yet, and neither had you. It does not count as an answer.
+
+The shape and the page are independent. Naming one does not answer the other.
 
 ```
 if the user asked a question, not for an artifact:  answer inline, ask nothing
-elif they answered AFTER the scribe existed:        honour it, ask nothing
-else:                                               AskUserQuestion, one call,
-                                                    BOTH rows below
+
+open = []
+if shape not answered AFTER the notes existed:  open += "what this becomes"
+if page not answered AFTER the notes existed:   open += "a page as well"
+if a page is wanted and no span was named:      open += "which span"
+
+if open:  AskUserQuestion — one call, those rows only, before writing anything
 ```
 
 | Question | Options |
 | - | - |
-| what this becomes | the rows further down |
+| what this becomes | the Artifact table below |
 | a page as well | no · a local HTML file in the bundle · a published Artifact |
-
-```
-if a page was chosen and no span was named:
-    AskUserQuestion again — a page needs a span, and the whole video is
-    rarely the answer
-```
+| which span | the Span table below |
 
 | Span | When |
 | - | - |
@@ -266,8 +267,28 @@ For a spec, apply `$SKILL_DIR/references/spec-quality.md` and write to
 `docs/specs/<NNN>-<slug>.md`, where NNN is one past the highest number already in
 `docs/specs/`, zero-padded to three digits. Never overwrite an existing file.
 
+```
+for criterion in acceptance_criteria:
+    if not runnable(criterion) and not observable(criterion):
+        rewrite or ask; do NOT ship "works correctly"
+if non_goals is empty:
+    spec is unfinished
+for item in claude_added_but_user_never_stated:
+    list under "Inferred (confirm or strike)"
+```
+
+The video is a source of ideas, not a requirements document. A spec describing
+the video has failed.
+
 Write any other artifact to `docs/notes/<slug>.md` unless the user named a
 destination, and say where you put it.
+
+Every claim traced to the video carries a `Watch:` line naming the bundle and
+the span it came from — in any artifact, not just a spec.
+
+```
+Watch: <video_id> 12:04-14:30
+```
 
 ### A page to look at
 
@@ -305,35 +326,16 @@ The page carries a per-screen collapse and a hide-every-screen toggle, so a
 reader can strip the frames and see what the transcript alone would have said.
 Leave both in — they are what make the page honest about the gap.
 
-```
-for criterion in acceptance_criteria:
-    if not runnable(criterion) and not observable(criterion):
-        rewrite or ask; do NOT ship "works correctly"
-if non_goals is empty:
-    spec is unfinished
-for item in claude_added_but_user_never_stated:
-    list under "Inferred (confirm or strike)"
-```
-
-The video is a source of ideas, not a requirements document. A spec describing
-the video has failed.
-
-Every claim traced to the video carries a `Watch:` line naming the bundle and
-the span it came from — in any artifact, not just a spec.
-
-```
-Watch: <video_id> 12:04-14:30
-```
-
 ## Library
 
-The scribe is `BUNDLE.md`: the transcript with frame pointers.
+Each scribed video is a bundle; `BUNDLE.md` is its transcript with frame
+pointers.
 
 ```bash
 "$PY" "$SC" index                           # id, frames, cues, size, length, last read, title
-"$PY" "$SC" index --json                    # adds url, pruned, reclaimable, path
+"$PY" "$SC" index --json                    # adds channel, url, duration, bytes, last_used, path
 "$PY" "$SC" index --root ./bundles          # a library built with -o
-"$PY" "$SC" search "<term>"                 # every scribe, first 40 hits
+"$PY" "$SC" search "<term>"                 # every bundle, first 40 hits
 "$PY" "$SC" search "<term>" -C 2 --limit 0  # with context, all hits
 "$PY" "$SC" search "<term>" --id <video>    # one video
 "$PY" "$SC" prune                           # prints the plan, deletes nothing
@@ -372,7 +374,7 @@ A `search` hit prints the bundle path once, then `HH:MM:SS` and
 Join the two to Read it. `-` means no frame is on disk for that cue. A bundle
 tagged `(title)` has no rows — the term matched its title, not its transcript.
 
-`prune` removes the bundle directory: frames, scribe, meta. A pruned video is
+`prune` removes the bundle directory: frames, `BUNDLE.md`, meta. A pruned video is
 gone from the library and comes back only by building it again.
 
 Selector precedence, highest first. They do not combine, and it is not argument
