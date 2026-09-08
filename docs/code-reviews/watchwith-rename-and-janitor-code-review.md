@@ -1,6 +1,6 @@
 # Code Review: watchwith-rename-and-janitor
 
-**Verdict:** ✅ APPROVED at round 3 — round 4 pending on a post-approval fix
+**Verdict:** ✅ APPROVED at round 5 (`6a6000d`) — all findings from all five rounds fixed
 
 | | |
 | - | - |
@@ -466,5 +466,110 @@ records `cache/MKT/plug/1.0.0`, disk holds `cache/mkt/plug/1.0.0`, `is_dir()`
 passes so the install is reachable and the guard is correctly silent, string
 equality then fails, the version is classed stale and removed, and the
 self-check reports `THIS IS A BUG` after the deletion.
+
+---
+
+## Review Round 4
+
+**Verdict:** 🚫 BLOCKED
+
+| | |
+| - | - |
+| **Reviewed SHA** | `55329d9` |
+| **Round** | 4 |
+| **Date** | 2026-09-08 |
+
+Round 3 approved `9fe4036`; the identity fix for R3-INFO-001 landed after that
+approval and invalidated it. This round reviews that fix alone.
+
+### 🟡 R4-MEDIUM-001 — The identity fix could delete what it could not identify
+
+**Location:** `janitor.py:318`
+
+`ident()` returns `None` when `stat` fails. `None` was filtered out of
+`installed_ids` — but the filter protects the set, and the *predicate* decides.
+`ident(v.path) not in installed_ids` is true for `None`, so a version that could
+not be stat'ed between the directory walk and the staleness test fell through to
+stale and `--yes` deleted it, with `THIS IS A BUG` printed afterwards.
+
+**Reproduced** by failing `stat` for exactly one live install's path, with a
+second reachable install present so the unreachable-registry guard could not
+mask it. Reachable through a transient failure — `ESTALE` on a network home, an
+autofs timeout, a concurrent `marketplace update` — since `is_dir()` and
+`os.stat` are the same syscall, making this a race rather than a steady state.
+
+Fixed by failing closed: not knowing what a directory is cannot be grounds for
+removing it.
+
+### Found by re-running the matrix, not by review
+
+The identity change had also narrowed two path forms. `os.stat` cannot walk a
+path whose intermediate component is missing, so an `installPath` of
+`<cache>/mk/nothere/../keep/1.0.0` — which the string comparison normalised
+lexically — failed to stat, was classed dangling, and the reachability guard
+then refused the entire run over one entry. `ident()` now resolves before
+stat'ing, and the dangling classification tests the resolved path.
+
+---
+
+## Review Round 5
+
+**Verdict:** ✅ APPROVED
+
+| | |
+| - | - |
+| **Reviewed SHA** | `2c3aaa2` (+ working-tree guard, shipped as `fbc6f51`) |
+| **Round** | 5 |
+| **Date** | 2026-09-08 |
+
+R4-MEDIUM-001 confirmed closed, reproduced independently with a real race rather
+than by patching `stat`. The two widenings in the round-4 fix were probed and
+found inert: `os.stat` already follows symlinks, so resolving first is a no-op
+for every existing path; a symlink loop fails closed; and the dangling report
+still names every genuinely-missing form.
+
+### 🟠 R5-HIGH-001 — A relative `installPath` deleted a live install, silently
+
+**Expert:** Primary · **Location:** `janitor.py:143`
+
+Found by continuing to attack the round-4 fix rather than by any reviewer.
+
+A relative path resolves against the process working directory, so whether an
+install looked reachable depended on where janitor was run from. **Alone it was
+harmless** — the reachability guard refused the run. **Beside a single absolute
+entry it was not:** something *was* reachable so the guard stayed quiet, the
+relative entry's live install was classed stale and deleted, and the self-check
+stayed silent too, because that path had already been counted as dangling and
+was therefore excluded from the comparison that exists to catch exactly this.
+Exit 0, no warning.
+
+Every earlier probe of this shape had used a single-entry registry, where the
+guard masked it. **The blind spot was in the test matrix, not only in the code.**
+
+An `installPath` is absolute; a relative one is now an unrecognised shape.
+
+### LOW
+
+| ID | Finding | Disposition |
+| - | - | - |
+| R5-LOW-001 | A non-string `installPath` (object, list, number, boolean) passed the truthiness check and raised a bare `TypeError` traceback rather than the schema-drift exit every other shape produces | fixed |
+| R5-LOW-002 | The relative-path guard also rejected `~/...`, so one such entry hard-exited before any report and disabled the tool; `~` is now expanded, and what stays relative still aborts | fixed |
+
+### Notes on Method
+
+Five rounds, and **every round found that the previous round's fix was
+incomplete or had introduced something new** — including both rounds whose
+fixes were mine and had passed their own tests.
+
+Three distinct paths to deleting a live install were found, plus two whole-cache
+wipes. None were visible by reading the code, including to its author. Each was
+found by running it against a shape nobody intended: a registry that parses but
+names nothing, one whose entries all dangle, a case-differing path on a
+case-insensitive filesystem, a stat that fails mid-run, and a relative path
+sitting beside an absolute one.
+
+`plugin-janitor` began this review as 244 lines of unreviewed code with 18
+tests. It ends with 49, every one covering a failure reproduced before the test
+was written.
 
 Generated with Claude Code
