@@ -1,6 +1,7 @@
 ---
 name: screenscribe
 description: Watch a video and write down what was actually on screen, then produce whatever the user needs from it. Use when the user wants Claude to "watch" a video or a span of one, references a tutorial, talk, screencast, or demo as the source of an idea, asks what was actually shown or run on screen, asks to review or critique a video, or wants a spec, review, summary, notes, walkthrough, or command list built from one. Also use to re-watch a span cited by an existing spec, story, or review, or to author a spec from a plain idea with no video. Do NOT use to transcribe or caption a video, or to work from its transcript without reading the frames.
+argument-hint: "[YouTube URL or video id | a video already scribed | nothing]"
 ---
 
 # Screenscribe
@@ -19,11 +20,6 @@ names them.
 
 The line falls after SCRIBE. Everything above it is mechanical; below it is
 whatever the user asked for.
-
-```
-if no video:        start at stage 3
-elif bundle exists: start at stage 2
-```
 
 ## Script Location
 
@@ -85,6 +81,26 @@ PY=$(python3 "$SC" bootstrap) || {
 }
 [ -x "$PY" ] || { echo "screenscribe: bootstrap printed '$PY', not an interpreter" >&2; exit 1; }
 ```
+
+## The argument
+
+A YouTube URL, a bare video id, words naming a video already scribed, or
+nothing. `build` accepts a URL and a bare id equally, so neither needs
+converting.
+
+```bash
+"$PY" "$SC" index          # what is already scribed
+```
+
+```
+if it names a video in the index:  stage 2, that bundle
+elif it is a URL or a video id:    stage 1, then stage 2
+elif it names no video at all:     stage 3, authoring from the idea
+```
+
+An argument carrying both a video and an instruction ("...— build the bundle,
+this is the origin of the riff repo") is one of each: the video selects the
+bundle, the rest is the brief for stage 4.
 
 ## Stage 1 — build
 
@@ -206,10 +222,15 @@ Say how many frames you read before going further.
 
 ## Stage 4 — emit
 
+```
+if the user named what they want:  build exactly that
+else:                              AskUserQuestion first, in one call:
+                                     which row below, and whether a page too
+```
+
 | Artifact | Shape |
 | - | - |
 | spec | `$SKILL_DIR/assets/spec-template.md` |
-| shareable page | `screenscribe.py artifact` (below), then publish it |
 | review | what was claimed vs what was shown, span by span |
 | summary / notes | free-form, every claim carrying a `Watch:` span |
 | walkthrough / command list | the commands in order, verbatim from the frames |
@@ -223,11 +244,26 @@ Write any other artifact to `docs/notes/<slug>.md` unless the user named a
 destination, and say where you put it. Answer inline instead only when the user
 asked a question rather than for an artifact.
 
-### Shareable page
+### A page to look at
 
-Optional, and never a substitute for the file above — a spec still lands in the
-repo as text an agent executes. Offer this when the output is for a person to
-look at: a review, a walkthrough, a summary someone else will read.
+Never a substitute for the file above — a spec still lands in the repo as text
+an agent executes. This is for a person: a review, a walkthrough, a summary
+someone will read.
+
+`artifact` writes a self-contained HTML file either way. Where it goes is the
+user's call, and the two are not the same act:
+
+| Destination | |
+| - | - |
+| `-o <bundle>/<slug>.html` | a local file, opened from disk; nothing leaves the machine |
+| the Artifact tool | published to claude.ai and reachable by link |
+
+```
+if the user has not said which:  ask
+```
+
+The page embeds another author's frames, so publishing is republishing. Default
+to the local file when the answer is unclear.
 
 ```bash
 "$PY" "$SC" artifact <video_id> 3:37 6:27 -o ./rebase-walkthrough.html

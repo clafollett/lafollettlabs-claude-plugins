@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `screenscribe` (v0.7.3, marketplace 1.28.1): the skill declares what it takes and asks before it emits.
+  - `argument-hint` in the frontmatter: a YouTube URL, a bare video id, a video already scribed, or nothing. `build` accepts a URL and a bare id equally — verified against yt-dlp, both resolve to the same id — so pasting the URL straight from the address bar needs no conversion, which is the common case.
+  - A `## The argument` section routes it: a name already in the index starts at stage 2, a URL or id starts at stage 1, and anything else starts at stage 3 authoring from the idea. It sits below `## Script Location` because it invokes `$PY`/`$SC`, which that section binds.
+  - Stage 4 now calls `AskUserQuestion` when the user has not said what they want, instead of picking an artifact shape for them — one call covering both the shape and whether a page is wanted.
+  - The page section names its destination as a choice rather than assuming publication: a local HTML file in the bundle, or a published Artifact. The page embeds another author's frames, so publishing is republishing; the local file is the default when the answer is unclear.
+  - `disable-model-invocation` was considered and deliberately not set. Screenscribe's citation discipline depends on a later session auto-triggering on a `Watch:` span it finds in a spec; disabling that would leave it working from the prose summary, which the same section forbids.
+
 ### Added
 - **`plugin-janitor` (v0.1.0, marketplace 1.28.0): a new plugin.** `/plugin marketplace update` fetches the whole marketplace repo, then copies each plugin whose version changed into `cache/<marketplace>/<plugin>/<version>/`. It copies; it never sweeps. Measured on one machine: 72 version bumps across six plugins, every one of them still a directory on disk unless someone removed it by hand.
   - `installed_plugins.json` records one `installPath` per installed plugin, so reachability is decidable: a version directory no `installPath` resolves to is dead. Janitor removes exactly those.
